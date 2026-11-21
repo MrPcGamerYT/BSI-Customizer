@@ -5,6 +5,7 @@
 #include "ByteUtils.h"
 #include "ZlibUtils.h"
 #include "settings_image_fixture.h"
+#include "native_ui_resources.h"
 #include <QCoreApplication>
 #include <QFile>
 #include <QMap>
@@ -61,8 +62,42 @@ void cycle(const QByteArray &base)
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+    if (app.arguments().size() == 4 && app.arguments().at(1) == QLatin1String("--export-native-ui"))
+        return NativeUiResources::exportReadOnly(app.arguments().at(2), app.arguments().at(3));
     const auto base = fixture();
-    require(QtResources::registeredFiles(base).size() == 15, QStringLiteral("fixture must be a real registered resource tree"));
+    require(QtResources::registeredFiles(base).size() == 15 + ShaderSettingsImageFixture::nativeControlNames().size(),
+            QStringLiteral("fixture must be a real registered resource tree, including stock-control dependencies"));
+    {
+        const auto missing = fixture(false, false);
+        const auto refused = ShaderSettingsImage::prepare(missing, true);
+        require(!refused.ok && refused.output.isEmpty() && refused.error.contains(QStringLiteral("qrc:/UiThemeObject.qml")),
+                QStringLiteral("missing native control resources cannot install a broken or imitation page: ") + refused.error);
+        const auto absentRemoval = ShaderSettingsImage::prepare(missing, false);
+        require(absentRemoval.ok && absentRemoval.output == missing && !absentRemoval.changed,
+                QStringLiteral("missing native controls do not block safe no-op removal"));
+        for (const auto &version : {QStringLiteral("17"), QStringLiteral("18"), QStringLiteral("19"), QStringLiteral("20")}) {
+            auto unsafe = base;
+            auto oldWindow = ShaderSettingsFixture::window();
+            oldWindow.replace(QStringLiteral("//BSI v17"), QStringLiteral("//BSI v") + version);
+            QString error;
+            require(ShaderSettingsImage::replaceSource(unsafe, QStringLiteral("UiSettingsWindow.qml"), oldWindow.toUtf8(), &error),
+                    QStringLiteral("stage an old material fixture: ") + error);
+            const auto blocked = ShaderSettingsImage::prepare(unsafe, true);
+            require(!blocked.ok && blocked.output.isEmpty() && blocked.error.contains(QStringLiteral("Update the rebuilt Settings panel")),
+                    QStringLiteral("a module-only update must refuse unsafe older shell decoration: ") + version + blocked.error);
+            // Older owned overlays must still be removable; requiring v21 to
+            // remove them would strand the very installations being repaired.
+            const auto old = ShaderSettingsSource::prepare(ShaderSettingsFixture::player(), oldWindow, ShaderSettingsFixture::pageCounts());
+            require(old.ok, QStringLiteral("build historical owned source overlay: ") + old.error);
+            require(ShaderSettingsImage::replaceSource(unsafe, QStringLiteral("plr.qml"), old.player.toUtf8(), &error)
+                        && ShaderSettingsImage::replaceSource(unsafe, QStringLiteral("UiSettingsWindow.qml"), old.window.toUtf8(), &error),
+                    QStringLiteral("stage historical installed integration: ") + error);
+            const auto removed = ShaderSettingsImage::prepare(unsafe, false);
+            require(removed.ok && removed.changed && !removed.installed
+                        && sources(removed.output).value(QStringLiteral("UiSettingsWindow.qml")) == oldWindow.toUtf8(),
+                    QStringLiteral("exact removal remains available on older Settings designs: ") + removed.error);
+        }
+    }
     const auto absent = ShaderSettingsImage::prepare(base, false);
     require(absent.ok && !absent.changed && !absent.installed && absent.output == base && absent.sources.isEmpty(),
             QStringLiteral("removing absent shaders is a pure no-op, not a native source/cache rewrite: ") + absent.error);

@@ -28,14 +28,14 @@ os.environ.setdefault("QT_QUICK_BACKEND", "software")
 # host's SDK/QML paths separate from the Python runtime's own QML plugins below.
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Default" if os.environ.get("BSI_TEST_QT_API") == "PyQt5" else "Basic")
 if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
-    from PyQt5.QtCore import pyqtSlot as Slot
+    from PyQt5.QtCore import pyqtProperty as Property, pyqtSignal as Signal, pyqtSlot as Slot
     from PyQt5.QtCore import QCoreApplication, QFileInfo, QLibraryInfo, QObject, QPointF, QRectF, QStandardPaths, Qt, QUrl, qVersion
     from PyQt5.QtGui import QGuiApplication
     from PyQt5.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
     from PyQt5.QtQuick import QQuickItem
     from PyQt5.QtTest import QTest
 else:
-    from PySide6.QtCore import Slot
+    from PySide6.QtCore import Property, Signal, Slot
     from PySide6.QtCore import QCoreApplication, QFileInfo, QLibraryInfo, QObject, QPointF, QRectF, QStandardPaths, Qt, QUrl, qVersion
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
@@ -49,14 +49,41 @@ class NativeDisplayFixture(QObject):
     The real C++ module must invoke these typed public Qt methods. No QML mock
     replaces Engine, preferences, native-method adapter or file transaction.
     """
+    flickableMovingChanged = Signal()
+    pIsEditingTextfieldChanged = Signal()
+
     def __init__(self):
         super().__init__()
+        self._moving, self._editing = False, False
         self.committed = {"fb_width": 1920, "fb_height": 1080, "custom_resolution_selected": False,
                           "dpi": 320, "fps": 90, "renderer": "vlcn", "unrelated": 42}
         self.draft = dict(self.committed)
         self.commits = 0
         self.discards = 0
         self.writes = []
+
+    @Property(bool, notify=flickableMovingChanged)
+    def pFlickableMoving(self): return self._moving
+
+    @pFlickableMoving.setter
+    def pFlickableMoving(self, value):
+        if self._moving != value:
+            self._moving = value
+            self.flickableMovingChanged.emit()
+
+    @Property(bool, notify=pIsEditingTextfieldChanged)
+    def pIsEditingTextfield(self): return self._editing
+
+    @pIsEditingTextfield.setter
+    def pIsEditingTextfield(self, value):
+        if self._editing != value:
+            self._editing = value
+            self.pIsEditingTextfieldChanged.emit()
+
+    @Slot(str, result=str)
+    def confGetString(self, key):
+        assert key == "bst.ui_scale_factor", key
+        return "1.0"
 
     @Slot(str, result=int)
     def confGetInstanceI32(self, key):
@@ -150,6 +177,10 @@ def main():
         assert not profile.exists() and not profile.is_symlink(), "test refuses to overwrite any existing profile"
         cleanup.callback(lambda: profile.unlink(missing_ok=True))
         engine = QQmlEngine()
+        from shaders.native_ui_fixture import install as install_native_ui, write_shell_material
+        write_shell_material(Path(temp))
+        native_theme, unregister_native_ui = install_native_ui(engine, Path(temp))
+        cleanup.callback(unregister_native_ui)
         native_display = NativeDisplayFixture()
         engine.rootContext().setContextProperty("uiBackend", native_display)
         # install-qt-action supplies QML2_IMPORT_PATH for the C++ build SDK. The
@@ -165,7 +196,8 @@ def main():
         engine.warnings.connect(lambda errors: warnings.extend(error.toString() for error in errors))
         # Check the host's real Controls installation independently, before
         # importing BSIShaders, so host packaging errors cannot look like a
-        # shader success/failure. No controls or native types are mocked.
+        # shader success/failure. Generic Qt Controls are never mocked; the
+        # explicit native-QRC adapter reports real resources versus contracts.
         controls = QQmlComponent(engine)
         controls.setData(b'import QtQuick 2.15; import QtQuick.Controls 2.15; Button { text: "Controls preflight" }', QUrl("file:///ControlsPreflight.qml"))
         assert controls.status() == QQmlComponent.Status.Ready, [e.toString() for e in controls.errors()]
@@ -176,11 +208,24 @@ def main():
         qml = b'''import QtQuick 2.15
 import QtQuick.Window 2.15
 import BSIShaders 1.0
+import "qrc:/" as Native
 Window {
     id: host
     width: 750; height: 470; visible: true
+    color: "#ff00ff"
     property alias shaderPage: shaderLoader.item
+    property int pCurrentTabIndex: 0
     property bool bsiShaderDirty: false
+    // Same native factory/roles as Display/Graphics, not the shader page's
+    // implementation. A custom-looking replacement cannot satisfy identity.
+    Native.UiButton {
+        id: nativeSaveControl
+        objectName: "stockSaveReference"
+        visible: false
+        pSize: UiTheme.buttons.sizes.medium
+        pColor: UiTheme.buttons.colors.accent
+        text: qsTranslate("QObject", "Save changes")
+    }
     Bootstrap { hostWindow: host; instanceName: "Fixture-Nougat64"; graphicsRenderer: "gl" }
     Item {
         anchors.fill: parent
@@ -190,6 +235,17 @@ Window {
             anchors.fill: parent; anchors.margins: 12
             source: "qrc:/bsi-shaders/BsiShadersSetting.qml"
             onLoaded: { item.bsiTabIndex = 12; item.fOnQmlLoaded() }
+        }
+        // Native Settings eagerly loads About even while it is not selected.
+        // Exercise the shipping material traversal against ACTUAL native
+        // controls; the independent Save reference above is outside this scope.
+        Loader {
+            id: materialLoader
+            objectName: "shaderShellMaterial"
+            anchors.fill: parent
+            source: "ShellMaterial.qml"
+            visible: false
+            onLoaded: item.fOnQmlLoaded()
         }
     }
     function savedSettings() { return JSON.stringify(Engine.saved) }
@@ -201,7 +257,7 @@ Window {
         assert component.status() == QQmlComponent.Status.Ready, [e.toString() for e in component.errors()]
         window = component.create()
         assert window, [e.toString() for e in component.errors()]
-        QTest.qWait(80)
+        QTest.qWait(220)  # include a full production About-material timer pass
         page = window.property("shaderPage")
         assert page, warnings
 
@@ -271,6 +327,44 @@ Window {
         if expected:
             assert info["moduleQtVersion"] == expected, info
         print("ACTUAL loaded public Qt bridge:", json.dumps(info, sort_keys=True), flush=True)
+        # The host deliberately has a changing game-like background. The whole
+        # page AND footer must be opaque independently of any Settings redesign.
+        def assert_opaque_page():
+            expected = native_theme.property("colors").property("primary80")
+            for background in ("#ff00ff", "#00ff00"):
+                evaluate("color = '" + background + "'", window)
+                QTest.qWait(40)
+                image = window.grabWindow()
+                assert not image.isNull(), "shader page capture failed"
+                for x, y in ((page.width() - 12, page.height() / 2), (4, page.height() - 4)):
+                    point = page.mapToScene(QPointF(x, y))
+                    pixel = image.pixelColor(round(point.x() * image.width() / window.width()), round(point.y() * image.height() / window.height()))
+                    assert pixel == expected and pixel.alpha() == 255, ("shader page/footer leaked the host background", background, x, y, pixel.name(), pixel.alpha(), expected.name())
+        if os.environ.get("BSI_SHADERS_TEST_TRANSPARENT_PAGE") == "1":
+            evaluate("color = 'transparent'")  # separately expected-to-fail control
+        assert_opaque_page()
+        original_panel = native_theme.property("colors").property("primary80").name()
+        evaluate("UiTheme.colors.primary80 = '#1f3549'", window)
+        assert_opaque_page()  # the backing must follow the live native theme
+        evaluate("UiTheme.colors.primary80 = '" + original_panel + "'", window)
+        native_controls = {"shaderSave": "UiButton", "shaderPresets": "UiComboBox",
+                           "shaderEnabled": "UiCheckBox", "shaderValue-saturation": "UiSlider",
+                           "shadersScroll": "UiScrollView", "shaderFooterInfo": "UiImage"}
+        from shaders.native_ui_fixture import assert_component
+        for name, kind in native_controls.items():
+            assert_component(item(name), kind)
+        if os.environ.get("BSI_SHADERS_NATIVE_UI_DIR"):
+            assert evaluate("status === 1", item("shaderFooterInfo")), "the actual native MenuInfo asset did not load"
+            for control in [child for child in all_items() if child.objectName().startswith("shaderValue-")]:
+                assert evaluate("handle.gradient == null && background.gradient == null", control), "shell decoration altered a native slider"
+            assert evaluate("pColorState.borderGradient == null ? background.item.gradient == null : background.item.gradient === pColorState.borderGradient", item("shaderSave")), "shell decoration replaced the native Save material"
+        assert evaluate("pSize === UiTheme.buttons.sizes.medium", item("shaderSave"))
+        assert evaluate("pColor === UiTheme.buttons.colors.accent", item("shaderSave"))
+        reference = window.findChild(QQuickItem, "stockSaveReference")
+        assert reference
+        assert item("shaderSave").property("implicitWidth") == reference.property("implicitWidth")
+        assert item("shaderSave").property("implicitHeight") == reference.property("implicitHeight")
+        assert item("shaderSave").property("font") == reference.property("font"), "Save font differs from the native button"
         initial = settings()
         assert initial["enabled"] is False and initial["potatoMode"] == 0 and len(initial) == 12
         assert evaluate("Engine.display.available"), evaluate("Engine.display.detail")
@@ -283,6 +377,8 @@ Window {
         footer_position = save_button.mapToItem(page, QPointF(0, 0))
         assert abs(footer_position.x() + save_button.width() - page.width()) < 1
         assert item("shaderRendererStatus").property("text")
+        from shaders.native_save_pixels import assert_save_pixels
+        assert_save_pixels(window, page, save_button, reference, evaluate, QTest, QPointF, Qt)
         click(item("shaderEnabled"))
         assert page.property("pEnableSave") and window.property("bsiShaderDirty"), "unsaved drafts must participate in native tab/close prompts"
         assert settings() == initial, "unsaved native UI edits must not affect the live parameters"
@@ -329,14 +425,24 @@ Window {
                 if child.isVisible():
                     assert child.x() >= -.5 and child.x() + child.width() <= form.width() + .5, ("form row overflows horizontally", width, child.objectName(), child.x(), child.width(), form.width())
             if width == 420 and os.environ.get("BSI_SHADERS_TEST_FONTLESS") == "1":
-                heading = item("shaderPotatoHeading")
+                heading = item("shaderResolutionHeading")
                 assert heading.property("implicitWidth") > form.width(), "font-isolated control did not exercise wide fallback metrics"
-                assert heading.width() <= form.width() and heading.height() > evaluate("look.bodyFont.pixelSize"), "wide fallback heading must wrap instead of widening every row"
+                assert heading.width() <= form.width() and heading.height() > evaluate("bsiTheme.fonts.bodyLarge.pixelSize"), "wide fallback heading must wrap instead of widening every row"
             for key in keys:
                 reset_button = item("shaderControlReset-" + key)
                 value_label = item("shaderValueLabel-" + key)
-                assert not evaluate("contentItem.truncated", reset_button), "Reset text was elided: " + key
-                assert evaluate("contentItem.width >= contentItem.implicitWidth", reset_button), "Reset text does not fit: " + key
+                # Native Qt 5/6 UiButton content is a Row/Column layout, not
+                # our former hand-painted Text. Inspect the actual label inside.
+                children, labels = list(reset_button.childItems()), []
+                while children:
+                    child = children.pop()
+                    children.extend(child.childItems())
+                    if child.metaObject().indexOfProperty("text") >= 0 and child.property("text") == reset_button.property("text"):
+                        labels.append(child)
+                assert labels, "native Reset label is missing: " + key
+                for label in labels:
+                    assert not label.property("truncated"), "Reset text was elided: " + key
+                    assert label.width() + .5 >= label.property("implicitWidth"), "Reset text does not fit: " + key
                 assert abs(reset_button.x() + reset_button.width() - reset_button.parentItem().width()) < 1, "Reset is not right-aligned: " + key
                 assert value_label.x() + value_label.width() <= reset_button.x() - 11, "value and Reset overlap: " + key
                 evaluate("setValue('" + key + "', 31)")
@@ -410,6 +516,31 @@ Window {
         evaluate("reset()")
         click(save_button)
         assert settings() == initial and native_display.committed == original_display
+        # Preserve the independently implemented resolution recovery action too:
+        # its longer native button must remain physically reachable at 420 px,
+        # including with actual player controls and missing-font metrics.
+        assert evaluate("Engine.bindNativeDisplay(uiBackend)")
+        select_potato(2)
+        click(save_button)
+        external = dict(native_display.committed, fb_width=1600, fb_height=900, custom_resolution_selected=True)
+        native_display.committed = dict(external)
+        native_display.draft = dict(external)
+        assert evaluate("Engine.bindNativeDisplay(uiBackend)")
+        window.setWidth(420)
+        QTest.qWait(100)
+        assert evaluate("Engine.display.conflict")
+        keep, modes = item("shaderPotatoKeep"), item("shaderPotatoModes")
+        assert keep.isVisible() and keep.isEnabled() and not modes.isEnabled()
+        writes, commits = list(native_display.writes), native_display.commits
+        click(keep)
+        assert evaluate("keepCurrentDisplay") and page.property("pEnableSave")
+        click(save_button)
+        assert settings() == initial and not page.property("pEnableSave")
+        assert native_display.committed == external and native_display.draft == external
+        assert native_display.writes == writes and native_display.commits == commits
+        stored = json.loads(profile.read_text())
+        assert stored["display"] == {} and "pendingDisplay" not in stored
+        assert not evaluate("Engine.display.conflict") and not keep.isVisible()
         assert not warnings, "QML runtime warnings:\n" + "\n".join(warnings)
         window.setVisible(False)
         window.deleteLater()

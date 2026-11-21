@@ -12,7 +12,11 @@ inline quint32 hash(const QString &name)
     for (auto c : name) { value = (value << 4) + c.unicode(); value ^= (value & 0xf0000000) >> 23; value &= 0x0fffffff; }
     return value;
 }
-inline QByteArray fixture(bool dense = false)
+inline QStringList nativeControlNames()
+{
+    return ShaderSettingsFixture::nativeControls;
+}
+inline QByteArray fixture(bool dense = false, bool withNativeControls = true)
 {
     QByteArray image(0x20000, '\0');
     image.replace(0, 2, "MZ"); putLe32(image, 0x3c, 0x80);
@@ -47,7 +51,13 @@ inline QByteArray fixture(bool dense = false)
     image.replace(0x18000, code.size(), code);
     QMap<QString, QByteArray> sources;
     sources.insert(QStringLiteral("plr.qml"), ShaderSettingsFixture::player().toUtf8());
-    sources.insert(QStringLiteral("UiSettingsWindow.qml"), ShaderSettingsFixture::window().toUtf8());
+    auto window = ShaderSettingsFixture::window();
+    window.replace(QStringLiteral("//BSI v17"), QStringLiteral("//BSI v21"));
+    sources.insert(QStringLiteral("UiSettingsWindow.qml"), window.toUtf8());
+    // Resource-namespace doubles only. Real component loading is separately
+    // tested against read-only resources from the four pinned player samples.
+    if (withNativeControls)
+        for (const auto &name : nativeControlNames()) sources.insert(name, QByteArray("import QtQuick 2.15\nItem{}\n"));
     for (const auto &page : ShaderSettingsFixture::pages) sources.insert(page, QByteArray("import QtQuick 2.15\nItem{}\n"));
     sources.insert(QStringLiteral("Unrelated.qml"), QByteArray("import QtQuick 2.15\nItem{property string untouched:'user edit'}\n"));
     QStringList ordered = sources.keys();

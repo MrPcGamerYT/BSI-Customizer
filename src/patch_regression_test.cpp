@@ -3503,6 +3503,11 @@ int runPatchRegressionTests()
         for (const auto &page : ShaderSettingsFixture::pages)
             shaderFiles << qMakePair(page, page == QLatin1String("PlrAboutSetting.qml")
                 ? aboutPageFixture() : QStringLiteral("import QtQuick 2.15\nItem{}\n"));
+        // The installer now requires the player's real root-QRC controls.
+        // These are namespace-only PE doubles; the opt-in native-control tests
+        // load unmodified, hash-pinned implementations in independent Qt hosts.
+        for (const auto &control : ShaderSettingsFixture::nativeControls)
+            shaderFiles << qMakePair(control, QStringLiteral("import QtQuick 2.15\nItem{}\n"));
         auto fixture = resources(shaderFiles);
         addRegistration(fixture, false);
         putLe32(fixture.f.bytes, 0x98 + 108, 16);
@@ -3518,6 +3523,62 @@ int runPatchRegressionTests()
             QString error;
             check(PatchFile::writeVerified(path, base, shader.output, &error),
                   QStringLiteral("the synthetic shader image is committed/read back atomically (%1)").arg(error));
+            // Model the already-deployed v20 design, with its genuine owned
+            // overlay and a recovery hash recorded by that earlier generator.
+            // Do not weaken production ownership checks to make migration work.
+            QString legacyWindow = linkedResourceText(read(path), QStringLiteral("UiSettingsWindow.qml"));
+            legacyWindow.replace(QStringLiteral("//BSI v21"), QStringLiteral("//BSI v20"));
+            QString legacyAbout = linkedResourceText(read(path), QStringLiteral("PlrAboutSetting.qml"));
+            const int materialBegin = legacyAbout.indexOf(QLatin1String("Component{id:g;Gradient{"));
+            const int materialEnd = legacyAbout.lastIndexOf(QLatin1String("\n}\n"));
+            check(materialBegin >= 0 && materialEnd > materialBegin,
+                  "the migration fixture identifies the owned About material independently of branding/artwork");
+            if (materialBegin >= 0 && materialEnd > materialBegin) {
+                // Archived, authored v20 material, not OEM QML. Merely changing
+                // the window version would miss the old frame gradient/rim.
+                legacyAbout.replace(materialBegin, materialEnd - materialBegin, QStringLiteral(R"QML(Component{id:g;Gradient{property var s;property color c:s.color;GradientStop{color:!c.a&&s.border.color.a&&s.parent.containsMouse!==undefined?a.edge:Qt.lighter(c,1.7)}GradientStop{position:1;color:s.c===a.c?c:Qt.rgba(c.r,c.g,c.b,c.a*.88)}}}
+function fGlassAll(){var r=parent;while(r&&r.bIcons===undefined)r=r.parent;if(!r)return;var q=[r],n=0;while(q.length&&n++<4096){var o=q.pop();if(!o||o.minimumSize!==undefined||o.item!==undefined&&o.source!==undefined||o.layer&&o.layer.enabled)continue;if(o.border&&o.gradient==null&&(o.c===a.c||o.parent&&o.parent.containsMouse!==undefined)){o.gradient=g.createObject(o,{s:o});if(o.c===a.c)o.border.color=Qt.binding(()=>a.edge)}var c=o.children||[];for(var i=0;i<c.length&&q.length<4096;i++)q.push(c[i])}}
+Connections{target:a.Window.window;function onPCurrentTabIndexChanged(){fGlassAll()}}
+Timer{interval:160;running:a.Window.window&&a.Window.window.visible;repeat:true;onTriggered:fGlassAll()})QML"));
+                legacyAbout.replace(QStringLiteral("Qt.callLater(fGlassTabs)"), QStringLiteral("Qt.callLater(fGlassAll)"));
+                legacyAbout.replace(QStringLiteral("property var c:UiTheme.colors\n"),
+                                    QStringLiteral("property var c:UiTheme.colors\nproperty color edge:Qt.rgba(c.primary10.r,c.primary10.g,c.primary10.b,.2)\n"));
+            }
+            auto legacyImage = read(path);
+            QString legacyBase;
+            check(ShaderSettingsSource::removeWindow(legacyWindow, &legacyBase, &error)
+                      && legacyAbout.contains(QStringLiteral("o.c===a.c"))
+                      && legacyAbout.contains(QStringLiteral("property color edge:"))
+                      && ShaderSettingsImage::replaceSource(legacyImage, QStringLiteral("UiSettingsWindow.qml"), legacyWindow.toUtf8(), &error)
+                      && ShaderSettingsImage::replaceSource(legacyImage, QStringLiteral("PlrAboutSetting.qml"), legacyAbout.toUtf8(), &error)
+                      && PatchFile::writeVerified(path, read(path), legacyImage, &error),
+                  QStringLiteral("stage the historical v20 window AND frame/hover glass material without changing native/shader callbacks (%1)").arg(error));
+            const QString recoveryPath = SettingsPanelPatcher::recoveryPathFor(path);
+            auto recovery = QJsonDocument::fromJson(read(recoveryPath)).object();
+            auto records = recovery.value(QStringLiteral("sources")).toArray();
+            int legacyHashesRecorded = 0;
+            for (int index = 0; index < records.size(); ++index) {
+                auto record = records.at(index).toObject();
+                const QString leaf = QFileInfo(record.value(QStringLiteral("path")).toString()).fileName();
+                const QStringList historical = leaf == QLatin1String("UiSettingsWindow.qml")
+                    ? QStringList{legacyWindow, legacyBase}
+                    : leaf == QLatin1String("PlrAboutSetting.qml") ? QStringList{legacyAbout} : QStringList{};
+                if (historical.isEmpty()) continue;
+                auto accepted = record.value(QStringLiteral("acceptedSha256")).toArray();
+                for (const auto &source : historical)
+                    accepted.append(QString::fromLatin1(QCryptographicHash::hash(source.toUtf8(), QCryptographicHash::Sha256).toHex()));
+                record.insert(QStringLiteral("acceptedSha256"), accepted);
+                records.replace(index, record);
+                ++legacyHashesRecorded;
+            }
+            recovery.insert(QStringLiteral("sources"), records);
+            write(recoveryPath, QJsonDocument(recovery).toJson(QJsonDocument::Compact));
+            const auto legacyState = SettingsPanelPatcher::analyze(path);
+            const auto moduleOnly = ShaderSettingsImage::prepare(read(path), true);
+            check(legacyHashesRecorded == 2 && legacyState.supported && legacyState.applied
+                      && legacyState.detail.contains(QStringLiteral("selected-tab-only glass"))
+                      && !moduleOnly.ok && moduleOnly.output.isEmpty(),
+                  "an owned v20 design remains recognizable for Update, while a module-only update refuses its old window styling");
             const auto active = SettingsPanelPatcher::analyze(path);
             check(active.supported && active.applied && !active.restorable && active.tabs.size() == 13
                       && active.tabs.last().toMap().value(QStringLiteral("id")).toString() == QLatin1String("bsishaderssetting.qml")
@@ -3531,10 +3592,18 @@ int runPatchRegressionTests()
             const QVariantMap options{{QStringLiteral("hiddenTabs"), QStringList{QStringLiteral("bsishaderssetting.qml")}}};
             const auto update = SettingsPanelPatcher::apply(path, QStringLiteral("Updated shader fixture"), {}, options, true);
             const auto updated = read(path);
+            const QString updatedWindow = linkedResourceText(updated, QStringLiteral("UiSettingsWindow.qml"));
+            const QString updatedAbout = linkedResourceText(updated, QStringLiteral("PlrAboutSetting.qml"));
             check(update.value(QStringLiteral("ok")).toBool()
-                      && ShaderSettingsSource::hasWindow(linkedResourceText(updated, QStringLiteral("UiSettingsWindow.qml")))
+                      && ShaderSettingsSource::hasWindow(updatedWindow)
+                      && updatedWindow.contains(QStringLiteral("//BSI v21"))
+                      && !updatedWindow.contains(QStringLiteral("//BSI v20"))
+                      && updatedAbout.contains(QStringLiteral("o.opacity===.2?v:null"))
+                      && !updatedAbout.contains(QStringLiteral("o.c===a.c"))
+                      && !updatedAbout.contains(QStringLiteral("fGlassAll"))
+                      && !updatedAbout.contains(QStringLiteral("property color edge:"))
                       && SettingsPanelPatcher::analyze(path).tabs.size() == 13,
-                  QStringLiteral("Settings Update preserves the independently owned shader navigation/dirty overlay and accepts its hidden/customizable icon id (%1)")
+                  QStringLiteral("v20 to v21 Settings Update restores the flat native frame/selected-only glass, preserves the owned shader navigation/dirty overlay and accepts its hidden/customizable icon id (%1)")
                       .arg(update.value(QStringLiteral("msg")).toString()));
             const auto repeat = SettingsPanelPatcher::apply(path, QStringLiteral("Updated shader fixture"), {}, options, true);
             check(repeat.value(QStringLiteral("ok")).toBool() && read(path) == updated,
@@ -5950,7 +6019,7 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI v20"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI v21"))
                           && !rebuiltWindow.contains(QStringLiteral("property var bHidden"))
                           // The About page publishes the icon map into
                           // bIcons, so the shell has to declare it or that
@@ -5963,11 +6032,11 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("Rectangle{id:r;property var c:UiTheme.colors;anchors.fill:parent;radius:14;color:r.c.primary80"))
                           && rebuiltWindow.contains(QStringLiteral("color:r.c.primary10"))
                           && !rebuiltWindow.contains(QStringLiteral("#0d0f14"))
-                          // The page host is inset from every window edge and
-                          // stops short of the bottom, so the native page and its
-                          // "Save changes" footer cannot run into the rounded
-                          // corner the way they did when the host filled the shell.
-                          && rebuiltWindow.contains(QStringLiteral("Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118"))
+                          // Retain the exact page/footer geometry while backing
+                          // transparent native pages with an opaque, flat
+                          // theme-colored Rectangle, not the old empty Item.
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{color:r.color;width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118"))
+                          && !rebuiltWindow.contains(QStringLiteral("Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118"))
                           // Own the real label and measure its actual themed
                           // font. The stock button's private label is left-aligned;
                           // app-font metrics did not match its themed font either.
@@ -6009,8 +6078,8 @@ Window {
                           // long neighbours ("Game settings" / "Devices")
                           // collide while short labels floated in dead space.
                           && rebuiltWindow.contains(QStringLiteral(";spacing:4"))
-                          // The native page stays flat; only tabs get the requested
-                          // soft selected/hover surface and actual icon tint.
+                          // Native pages stay flat. Only the selected tab gets
+                          // glass; retain the stock flat hover tint/icon behavior.
                           && rebuiltWindow.contains(QStringLiteral("radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0"))
                           && rebuiltWindow.contains(QStringLiteral("border.color:index==pCurrentTabIndex?t.color:'transparent';color:'transparent'"))
                           && !rebuiltWindow.contains(QStringLiteral("visible:s"))
@@ -6096,7 +6165,10 @@ Window {
                           && rebuiltAbout.contains(QStringLiteral("o.layer&&o.layer.enabled"))
                           && rebuiltAbout.contains(QStringLiteral("onPCurrentTabIndexChanged"))
                           && !rebuiltAbout.contains(QStringLiteral("if(!o.radius)o.radius=6"))
-                          && rebuiltAbout.contains(QStringLiteral("function fGlassAll()"))
+                          && rebuiltAbout.contains(QStringLiteral("function fGlassTabs()"))
+                          && rebuiltAbout.contains(QStringLiteral("o.opacity===.2?v:null"))
+                          && !rebuiltAbout.contains(QStringLiteral("o.c===a.c"))
+                          && !rebuiltAbout.contains(QStringLiteral("border.color=Qt.binding"))
                           && rebuiltAbout.contains(QStringLiteral("BSI Panel Regression"))
                           && rebuiltAbout.contains(QStringLiteral("Repeater"))
                           // The About content is one centred column; it used
@@ -6169,7 +6241,7 @@ Window {
                               // the window and threw "Cannot assign to non-existent
                               // property bHidden", which is exactly why a saved custom
                               // tab icon applied and then never appeared.
-                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons;Qt.callLater(fGlassAll)}"))
+                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons;Qt.callLater(fGlassTabs)}"))
                               // On a Qt 5 player the icon must NOT be embedded: its
                               // Image cannot open a data: URI (measured: status Error,
                               // while the same bytes load from a file), so it would

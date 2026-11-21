@@ -1,8 +1,10 @@
-"""Real Qt 5/6 pixels and input for the shipping shell AND About-hosted glass.
+"""Real Qt 5/6 pixels/input: flat native Settings, glass ONLY on selected tabs.
 
 The generated resources are unmodified. Authored page doubles reproduce the
 observed public contracts: Loader-backed buttons, asset-backed indicators,
 slider track/fill/handle, text validation and an Overlay-reparented combo popup.
+Require exact theme pixels across the whole frame/page/footer, with no gradient
+on the shell or unselected/hovered tabs. The selected reflection stays strict.
 No OEM source/artwork, player process, game renderer or optional effects plugin.
 """
 import importlib.util
@@ -225,20 +227,28 @@ def main():
 
     about = named("aboutSettings", visible=False)
     surface = next(i for i in tree() if m.prop(i, "radius") == 14)
-    assert gradient(surface), "the actual window stayed flat: Qt's unset gradient can be undefined, not only null"
-    assert evaluate(surface, "gradient.stops[1].color.a") == 1, "do not reveal an uninitialized game frame through Settings"
-    if os.environ.get("BSI_GLASS_NEGATIVE_FLAT") == "1":
-        # Intentional negative control: keep the real Gradient installed but
-        # remove its reflection. A property-only or misaddressed-pixel test
-        # must never accept this as a pass, at any monitor scale.
-        evaluate(surface, "gradient.stops[0].color = gradient.stops[1].color")
-    # Sample before reading the top stop's color: that getter can force Qt 5
-    # bindings and mask a gradient installed too early in a Loader's onLoaded.
+    expected_panel = m.QColor(evaluate(about, "String(UiTheme.colors.primary80)"))
+    if os.environ.get("BSI_SETTINGS_NEGATIVE_FRAME") == "1":
+        # Reproduce the screenshot's lighter frame/darker inset without even
+        # needing transparency or a Gradient. The exact PIXELS must reject it.
+        surface.setProperty("color", m.QColor("#353b47"))
     top = pixel(surface, 12, 30)
     bottom = pixel(surface, 12, surface.height() - 30)
-    assert top.lightness() > bottom.lightness() + 6, ("the window reflection is not present in the rendered pixels", top.name(), bottom.name(), top.lightness(), bottom.lightness())
-    # The shell has a reflective glass feel, but its opaque foundation must not
-    # flash a different color when a game beneath it repaints on a tab change.
+    assert top == bottom == expected_panel, ("the whole Settings frame must use the exact flat native theme", top.name(), bottom.name(), expected_panel.name())
+    assert not gradient(surface), "glass must not restyle the Settings frame"
+    assert expected_panel.alpha() == 255 and surface.property("color") == expected_panel
+    selected_fill = next(i for i in tree() if i.objectName() == "bsiTabGlass" and m.prop(i, "opacity") == .2)
+    assert gradient(selected_fill), "only the selected tab must have glass"
+    if os.environ.get("BSI_GLASS_NEGATIVE_FLAT") == "1":
+        # The requested reflection belongs ONLY to the selected tab now. Keep
+        # the same strict >6 painted-lightness delta and five-DPI coverage;
+        # flattening it must still fail, not count as opaque-theme success.
+        evaluate(selected_fill, "gradient.stops[0].color = gradient.stops[1].color")
+    tab_top = pixel(selected_fill, 5, 8)
+    tab_bottom = pixel(selected_fill, 5, selected_fill.height() - 8)
+    assert tab_top.lightness() > tab_bottom.lightness() + 6, ("the selected-tab reflection is not present in the rendered pixels", tab_top.name(), tab_bottom.name(), tab_top.lightness(), tab_bottom.lightness())
+    # Both frame and page/footer must stay native-primary80 over a repainting
+    # game; no brighter outer frame/dark inset rectangle as in the screenshot.
     # This compositing test also works with software captures in RGB32.
     backdrop_component = m.QQmlComponent(preview.engine)
     backdrop_component.setData(b'import QtQuick 2.15; Rectangle { width:780; height:500; z:-1; color:"white" }', m.QUrl("Backdrop.qml"))
@@ -256,17 +266,16 @@ def main():
     # game must not change even one of these page/footer-background samples.
     probes = [(foundation.width() - 8, y) for y in (8, 100, foundation.height() - 8)]
     before_page = [pixel(foundation, x, y) for x, y in probes]
+    assert all(color == expected_panel for color in before_page), "the page/footer must match the surrounding native frame exactly"
     backdrop.setProperty("color", m.QColor("#ff00ff"))
     m.QTest.qWait(20)
     assert [pixel(foundation, x, y) for x, y in probes] == before_page, "the native page/footer exposed the simulated game"
     m.QTest.qWait(20)
-    glass_bottom = pixel(surface, 12, surface.height() - 30)
-    glass_top = pixel(surface, 12, 30)
-    assert glass_bottom == bottom and glass_top == top, "the Settings foundation leaked the unrelated/game surface below it"
-    assert not gradient(named("glassButtonBackground")), "the shell pass must not replace native control materials"
+    assert pixel(surface, 12, surface.height() - 30) == bottom and pixel(surface, 12, 30) == top, "the Settings foundation leaked the unrelated/game surface below it"
+    assert not gradient(surface), "a deferred pass must not add glass to the frame"
+    assert not gradient(named("glassButtonBackground")), "the tab pass must not replace native control materials"
     assert evaluate(backdrop, "gradient == null"), "Settings styling escaped into an unrelated sibling"
     backdrop.setProperty("visible", False)
-    assert 0 < evaluate(surface, "border.color.a") < .3, "the outer glass rim must stay quiet"
 
     for name in ("glassButtonBackground", "glassFieldBackground", "glassTrack", "glassFill", "glassHandle", "glassDisabledBackground"):
         assert not evaluate(named(name), "gradient != null"), name + " acquired an unsafe material"
@@ -315,8 +324,11 @@ def main():
     page.setProperty("alternate", True)
     m.QTest.qWait(200)
     assert not gradient(named("glassReplacementBackground")), "lazy native Loader content must remain unmodified"
+    selected_material = evaluate(selected_fill, "gradient")
     for _ in range(10):
-        assert QMetaObject.invokeMethod(about, "fGlassAll") is not False
+        assert QMetaObject.invokeMethod(about, "fGlassTabs") is not False
+    assert evaluate(selected_fill, "gradient") == selected_material, "rescanning allocated a replacement selected-tab material"
+    assert not gradient(surface), "rescanning decorated the entire window instead of only its selected tab"
     assert not [i for i in m.items(named("glassToggle")) if i.objectName() == "bsiGlass"], "rescanning inserted a native-indicator overlay"
     assert named("glassReplacementBackground").property("radius") == 4
     for name in ("nativeLayeredBackground", "nativeLayeredInner", "nativeLayoutRectangle", "nativeScrollThumb", "nativeScrollBackground"):
@@ -359,7 +371,8 @@ def main():
     m.QTest.qWait(20)
     assert hover.property("containsMouse") and window.property("pCurrentTabIndex") == 0
     fill = next(i for i in hover.childItems() if m.prop(i, "radius") == 6 and m.prop(i, "opacity") == .1)
-    assert gradient(fill), "hover must use the same glass material, at lower opacity"
+    assert not gradient(fill), "an unselected/hovered tab must keep its flat tint, not glass"
+    assert pixel(fill, 5, 8) == pixel(fill, 5, fill.height() - 8), "hover acquired a painted reflection"
     # Sample the centre of the one-logical-pixel stroke, not its inner
     # antialiased boundary at fractional DPI. Still require the exact opaque
     # accent color; do not loosen it to a property-only/approximate assertion.
@@ -375,8 +388,8 @@ def main():
     evaluate(about, "UiTheme.colors.primary80 = '#edf1f7'; UiTheme.colors.primary10 = '#19202b'")
     m.QTest.qWait(30)
     assert pixel(surface, 12, 60) != old
-    assert m.QColor(evaluate(surface, "String(gradient.stops[1].color)")).red() > 200
-    assert evaluate(surface, "border.color.r") < .2, "the glass rim did not follow the light palette"
+    assert not gradient(surface)
+    assert pixel(surface, 12, 60) == pixel(foundation, foundation.width() - 8, 100) == m.QColor("#edf1f7"), "the flat complete window must follow the live native light theme exactly"
     evaluate(about, "UiTheme.colors.primary80 = '#101a27'; UiTheme.colors.primary10 = '#f4f7fb'")
     preview.event({"type": "accent", "warm": False})
 
@@ -385,6 +398,10 @@ def main():
         preview.event({"type": "navigate", "index": index})
         m.QTest.qWait(180)
         assert window.property("pCurrentTabIndex") == index
+        fills = [i for i in tree() if i.objectName() == "bsiTabGlass"]
+        assert sum(gradient(i) for i in fills) == 1, "exactly the selected tab, never all tabs, must have glass"
+        assert all(gradient(i) == (m.prop(i, "opacity") == .2) for i in fills)
+        assert not gradient(surface) and pixel(surface, 12, 60) == pixel(foundation, foundation.width() - 8, 100) == m.QColor("#101a27"), "a middle page or deferred pass changed the uniform native background"
         if index != 11:
             assert not gradient(named("glassFieldBackground")), "a newly visible native page was restyled"
     assert named("bsiAboutEmulatorLogo").width() == 160
@@ -413,7 +430,7 @@ def main():
     window.hide()
     window.deleteLater()
     m.QTest.qWait(20)
-    print(f"PASS Qt {qVersion()}: real generated shell glass pixels/alpha, flat opaque page foundation, untouched native materials/input/validation/Loader/popup, preserved gradients, dark/light/accent bindings, selected/hover/indicator states, all twelve pages, bounds and no hidden-window work; authored services only")
+    print(f"PASS Qt {qVersion()}: exact flat opaque native-theme frame/page/footer pixels, selected-tab-only glass and flat hover, untouched native materials/input/validation/Loader/popup, preserved native gradients, dark/light/accent bindings, all twelve pages, bounds and no hidden-window work; authored services only")
 
 
 if __name__ == "__main__":

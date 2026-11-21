@@ -40,8 +40,11 @@ do not establish that your player's game presentation works on your GPU/driver.
    SHA-256 recorded in that run's summary. Do not use an older successful run.
 2. Sign in normally, select the correct `HD-Player.exe`, and go to
    **PATCHER → Player interface → Settings panel**. Apply the native top-tabs
-   Settings redesign if it is not already applied. This is a required, separately
-   reviewed step; shader installation does not guess/replace an unknown shell.
+   Settings redesign, or **Update rebuilt Settings panel** on an earlier design.
+   The current v21 design has one flat, opaque native-theme background and glass
+   only on the selected tab; a module-only update cannot replace that shell.
+   This is a required, separately reviewed step; shader installation does not
+   guess/replace an unknown shell.
 3. In the same Player interface page, open **Shaders → 1. Inspect compatibility**.
    Nothing is installed on page entry or by inspection. Read the report and
    hashes. Unsupported versions, insufficient fixed resource space, edited
@@ -94,25 +97,30 @@ inactive. This fallback still requires testing in the real player.
    the game pauses behind it, then reopen to check the count.
 4. Disable effects and Save. The original game image must return and processing
    must bypass. **Reset visuals** restores the neutral disabled visual defaults
-   without changing the independent native Potato size. Zero values also bypass
+   without changing the separate native render resolution. Zero values also bypass
    postprocessing. These are visual effects, not a promise of more FPS,
    HDR display output or an exact copy of the uploaded shader algorithms.
-5. Repeat for **OpenGL, DirectX and Vulkan**, selecting the game's Graphics
-   renderer and fully restarting the player after each change. A loaded graphics
-   DLL or an ANGLE translation layer does not prove another game API was tested.
-   Unrecognized/unsupported/protected surfaces should remain untouched with a
-   bypass status, not display a false success.
+5. In an authorized test setup, compare **OpenGL, DirectX and Vulkan only where
+   the native player/Android instance offers them**, fully restarting after each
+   user-chosen change. Newer BlueStacks versions can offer combined Vulkan &
+   OpenGL; that setting is not the Android app's detected API or a guaranteed
+   Win32 Vulkan presentation path. A loaded DLL/ANGLE layer is not proof.
+   Unrecognized/unsupported/protected surfaces must remain untouched with an
+   honest bypass status. For the reported Free Fire zero-frame run, see the
+   [renderer research and smallest useful evidence](FREE-FIRE-RENDERER-ANALYSIS.md).
+   No automatic renderer change or Qt/interface-surface substitute is made.
 
 Also check Save/reopen/restart persistence, individual reset, presets, Discard,
 No/Discard prompts on tab switching and close, per-instance separation, native
 callbacks/Save/footer, resize/fullscreen, changing monitors and hybrid GPUs.
 Test custom/default/hidden icons and Settings Update without losing Shaders.
 
-## Potato graphics — native render size
+## Render resolution (optional) — not the video's Potato effect
 
-This new control changes **native Display configuration**, not the archive's
-texture LOD, geometry or a final-frame blur. It is independent of Enable visual
-effects and Vulkan detection. See [why, exact limits and recovery](POTATO-NATIVE-RESOLUTION.md).
+This separate control changes **native Display configuration**, not the requested
+texture-detail Potato effect, geometry or a final-frame blur. It is not completion
+of that request. It is independent of Enable visual effects and Vulkan detection.
+See [exact limits and recovery](POTATO-NATIVE-RESOLUTION.md).
 
 1. Record the original native Display size/custom flag. In Shaders, choose
    **Light · 720 px short edge** or **Strong · 540 px short edge**. At 1920×1080,
@@ -131,13 +139,13 @@ effects and Vulkan detection. See [why, exact limits and recovery](POTATO-NATIVE
    retaining its separate configuration.
 5. Choose **Native / restore original**, Save and restart. Verify the exact
    original size/custom flag, not an assumed 1080p default.
-6. Separately change native Display while a Potato profile is configured. Shaders
+6. Separately change native Display while a resolution profile is configured. Shaders
    must report a conflict rather than overwriting that newer size. **Keep current
    display**, then Save, clears only the old restore snapshot. A native-size Save
    must also refuse unrelated native unsaved drafts, never commit/discard them.
 
 A disabled/unavailable control is a failed native-method qualification, not a
-working Potato mode. Send its exact diagnostic. Do not force a smaller size,
+working resolution option. Send its exact diagnostic. Do not force a smaller size,
 change DPI/FPS/renderer to hide a failure, or call saved values an actual-game
 pass. This does not implement or certify texture-only LOD/NVIDIA profile fixes.
 

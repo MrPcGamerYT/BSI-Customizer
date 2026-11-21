@@ -104,6 +104,16 @@ assert.match(view, /Rebuild the BlueStacks Settings panel/);
 assert.match(view, /center the native page content/);
 assert.match(view, /settings-rebuild-preview/);
 assert.match(view, /settings-preview-tab/);
+assert.match(view, /whole window uses the opaque native theme/);
+assert.match(view, /glass is limited to the selected tab/);
+assert.doesNotMatch(view, /Glass surfaces, selected tabs and native controls/);
+const styles = readFileSync(new URL('../src/web/styles.css', import.meta.url), 'utf8');
+// Match the final cascade rule, not a stale earlier illustration definition.
+const frameRules = [...styles.matchAll(/\.settings-rebuild-preview\{([^}]+)\}/g)];
+const opaqueFrame = frameRules.findLast(rule => rule[1].includes('background:'))?.[1];
+assert.match(opaqueFrame, /background:var\(--bg1\)/);
+assert.doesNotMatch(opaqueFrame, /gradient|inset/);
+assert.match(styles, /\.settings-preview-tab\{border-radius:6px\}/);
 assert.match(view, /Apply Settings panel rebuild/);
 assert.match(view, /About page identity/);
 assert.match(view, /Choose logo/);

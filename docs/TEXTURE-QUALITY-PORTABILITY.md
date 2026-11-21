@@ -2,7 +2,7 @@
 
 **No universal texture-LOD Potato mode is implemented or enabled in Shaders.
 No merge is approved by this experiment.** The separate
-[native render-size Potato control](POTATO-NATIVE-RESOLUTION.md) changes actual
+[optional render-resolution control](POTATO-NATIVE-RESOLUTION.md) changes actual
 Display configuration after Save, not game texture/sampler bindings. This is independently authored, Visual
 Studio-buildable source for the common sampler policy and API descriptor
 adapters. It does not intercept game textures, rewrite descriptor bindings, or

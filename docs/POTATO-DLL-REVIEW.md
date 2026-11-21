@@ -6,7 +6,7 @@ failure have not been reproduced/fixed in the player.** This review does not
 certify these binaries as safe. Subsequent independently authored sampler-policy
 work is described in [the portability experiment](TEXTURE-QUALITY-PORTABILITY.md);
 it remains disconnected from game bindings. The separately implemented
-[native render-size Potato control](POTATO-NATIVE-RESOLUTION.md) changes native
+[optional render-resolution control](POTATO-NATIVE-RESOLUTION.md) changes native
 Display configuration after Save, not these binaries or their texture LOD.
 Neither path turns the supplied binaries into an installed/verified feature.
 

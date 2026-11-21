@@ -75,8 +75,8 @@ about = re.search(r'QString generated = QStringLiteral\(R"QML\((.*?)\)QML"\);', 
 assert window and about
 # A coarse template-bloat guard only. The full compressed native prefix,
 # callbacks and geometry helper are measured in settings_panel_window_budget_test.
-# Two 22px capsule radii replace the old 6px corners. This raw-source guard
-# is deliberately secondary to the unchanged full compressed-slot/headroom gate.
+# Preserve the approved 6px corners. This raw-source guard is secondary
+# to the unchanged complete compressed-slot/headroom gate.
 assert len(window.group(1).encode()) <= 2080, "keep the shell compact; also run the complete-window compression budget test"
 assert "QVariantMap storedIcons = packIcons;" in cpp
 assert "storedIcons.insert(it.key().toCaseFolded(), it.value());" in cpp
@@ -119,9 +119,11 @@ for count in (12, 13):
     for token, value in current.items():
         doc = doc.replace("@@BSI_" + token + "@@", value)
     assert "@@BSI_" not in doc
-    assert "function fGlassAll()" in doc and "s.c===a.c?c:Qt.rgba" in doc
+    assert "function fGlassTabs()" in doc and "o.opacity===.2?v:null" in doc
+    assert "o.color.a" in doc and "o.objectName!=='bsiTabGlass'" in doc
+    assert "o.c===a.c" not in doc and "border.color=Qt.binding" not in doc, "never decorate the outer Settings frame"
     assert "o.minimumSize!==undefined" in doc and "o.layer&&o.layer.enabled" in doc
-    assert "p.bIcons=bsiTabIcons;Qt.callLater(fGlassAll)" in doc and "onPCurrentTabIndexChanged" in doc
+    assert "p.bIcons=bsiTabIcons;Qt.callLater(fGlassTabs)" in doc and "onPCurrentTabIndexChanged" in doc
     assert "triggeredOnStart" not in doc, "Qt 5 must finish Loader bindings before initial gradient creation"
     payload = 4 + len(zlib.compress(doc.encode(), 9))
     assert payload <= 2337, f"complete glass + {count} independent icons, logo and four links exceed About: {payload} > 2337"

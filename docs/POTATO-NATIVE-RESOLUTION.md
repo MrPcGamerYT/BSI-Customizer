@@ -1,11 +1,14 @@
-# Potato in Shaders: actual native render size, not texture LOD
+# Optional render resolution in Shaders — not the requested texture Potato
 
-**Experimental implementation; no installed-player, FPS or universal GPU claim.**
-The native **Settings → Shaders** page now contains **Potato graphics · native
-render size**. This is independently authored source, not the supplied proxy DLL,
-a color preset, a blur/pixelation shader, or an unconnected selector.
+**Experimental Display convenience; not completion of the video-like Potato
+request, and no installed-player, FPS or universal GPU claim.** The native
+**Settings → Shaders** page labels this separate option **Render resolution
+(optional)**. Resolution reduction is not an accepted substitute for the
+requested texture-detail effect. No texture-LOD selector is presented as working.
+The old internal `potatoMode`/`previewPotato` names remain only for v2 preference
+and recovery/API compatibility; they do not identify a texture feature.
 
-## Why this implementation
+## What this separate option does and does not do
 
 The [static DLL review](POTATO-DLL-REVIEW.md) found OpenGL draw/bind-time texture
 LOD overrides of 1.5 / 3.0. A final-frame shader cannot reproduce those overrides:
@@ -21,8 +24,9 @@ implemented**; the [sampler policy experiment](TEXTURE-QUALITY-PORTABILITY.md)
 remains disconnected from game resources. No supplied binary/source was copied,
 no NVIDIA profile is reset, and the reported profile conflict is not fixed.
 
-The best practical implemented workload reduction here is the player's **own
-native framebuffer size**, through the same public config calls used by Display.
+Separately, this option requests the player's **own native framebuffer size**,
+through the same public config calls used by Display. It does not implement or
+match the appearance of the video’s texture-detail effect.
 It is independent of visual postprocessing and does not require Vulkan detection
 to work as a config operation. It makes no claim to lower texture allocation,
 geometry, draw distance or every game's internal resolution. The actual guest
@@ -66,7 +70,7 @@ favorites list is changed. Visual effects can add work independently.
   automatic restart** and no claim of a live resolution switch. The page retains
   a restart notice after the current process saves it.
 - **Enable visual effects**, Enhance/presets and **Reset visuals** affect only
-  the original ten visual effects. They neither disable nor enable Potato.
+  the original ten visual effects. They neither disable nor enable the resolution option.
   A native reduction works with postprocessing off; a neutral shader status
   therefore does not mean the native size is unchanged.
 - Choose **Native / restore original**, Save and restart to undo the reduction.
@@ -101,7 +105,7 @@ of a running backend, disk flush, restart or game-resolution change.
 
 Void and boolean-returning setters/commit are supported; boolean refusals are
 honored. Unknown/incomplete contracts, invalid dimensions, destroyed backends
-or cross-thread objects make Potato unavailable, not an active-looking no-op.
+or cross-thread objects make the resolution option unavailable, not an active-looking no-op.
 The QML page binds the existing `uiBackend` context object after construction;
 no QObject is serialized through native page-model arguments.
 

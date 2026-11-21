@@ -6,6 +6,8 @@ namespace BsiShaders {
 // A native framebuffer-size profile, NOT a postprocess or game-texture sampler
 // override. These are the public Display page's known custom-resolution bounds.
 // No FPS, driver, root, DPI, graphics-API or guest/game-file setting is changed.
+// Keep the historical internal name for v2 preference/API compatibility. The
+// visible option is Render resolution, not the requested texture-LOD Potato.
 enum class PotatoMode { Native=0, Light=1, Strong=2 };
 struct DisplayResolution {
     int width=0,height=0;
@@ -29,7 +31,7 @@ inline PotatoResolutionPlan planPotatoResolution(PotatoMode mode,const DisplayRe
     PotatoResolutionPlan plan{original,false,"Native display resolution retained."};
     if(!original.valid()){plan.diagnostic="The native framebuffer size is outside the supported capture bounds; no display change is allowed.";return plan;}
     if(mode==PotatoMode::Native)return plan;
-    if(mode!=PotatoMode::Light&&mode!=PotatoMode::Strong){plan.diagnostic="Unknown Potato mode; native resolution retained.";return plan;}
+    if(mode!=PotatoMode::Light&&mode!=PotatoMode::Strong){plan.diagnostic="Unknown resolution mode; native resolution retained.";return plan;}
     const int cap=mode==PotatoMode::Light?720:540;
     const int shorter=(std::min)(original.width,original.height);
     if(shorter<=cap){plan.diagnostic="Already at or below this profile's resolution. No reduction is available; the mode will not be saved as a pretend performance change.";return plan;}

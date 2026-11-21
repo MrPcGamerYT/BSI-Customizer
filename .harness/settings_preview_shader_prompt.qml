@@ -3,7 +3,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import BsiGuiFixture 1.0
-import "qrc:/bsi-shaders" as Shaders
+import "qrc:/" as Native
 
 Dialog {
     id: prompt
@@ -22,24 +22,25 @@ Dialog {
     padding: 24
     closePolicy: Popup.CloseOnEscape
     header: null; footer: null
-    Shaders.ShaderStyle { id: look; nativeTheme: UiTheme }
-    background: Shaders.ShaderSurface { base: look.panel; radius: 12; border.color: look.border }
+    background: Rectangle { color: UiTheme.colors.primary80; radius: 12; border.color: UiTheme.colors.primary60 }
     contentItem: ColumnLayout {
         spacing: 24
         Text {
             Layout.fillWidth: true; wrapMode: Text.Wrap
             text: qsTr("You have unsaved changes. Discard them?")
-            color: look.text; font: look.bodyFont
+            color: UiTheme.colors.primary10; font: UiTheme.fonts.bodyMedium
         }
         RowLayout {
             Layout.fillWidth: true; spacing: 8
             Item { Layout.fillWidth: true }
-            Shaders.ShaderButton {
-                objectName: "previewKeepChanges"; shaderStyle: look
+            Native.UiButton {
+                objectName: "previewKeepChanges"
+                pSize: UiTheme.buttons.sizes.medium; pColor: UiTheme.buttons.colors.secondary
                 text: qsTr("No"); onClicked: prompt.close()
             }
-            Shaders.ShaderButton {
-                objectName: "previewDiscardChanges"; shaderStyle: look; primary: true
+            Native.UiButton {
+                objectName: "previewDiscardChanges"
+                pSize: UiTheme.buttons.sizes.medium; pColor: UiTheme.buttons.colors.accent
                 text: qsTr("Discard Changes")
                 onClicked: { prompt.close(); prompt.discardRequested(prompt.pendingTab, prompt.pendingClose) }
             }

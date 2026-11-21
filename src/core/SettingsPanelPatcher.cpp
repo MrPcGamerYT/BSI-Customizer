@@ -55,7 +55,8 @@ const QString kWindowDesignMarkerV16 = QStringLiteral("BSI v16");
 const QString kWindowDesignMarkerV17 = QStringLiteral("BSI v17");
 const QString kWindowDesignMarkerV18 = QStringLiteral("BSI v18");
 const QString kWindowDesignMarkerV19 = QStringLiteral("BSI v19");
-const QString kWindowDesignMarker = QStringLiteral("BSI v20");
+const QString kWindowDesignMarkerV20 = QStringLiteral("BSI v20");
+const QString kWindowDesignMarker = QStringLiteral("BSI v21");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -631,7 +632,7 @@ QString buildWindow(const QString &stock)
     // Keep the template small, but the *whole* compressed Window (including
     // native callbacks, copyright header and geometry helper) must fit the slot.
     // Template length alone cannot predict that compression budget.
-    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v20
+    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v21
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bIcons:({})
 Rectangle{id:r;property var c:UiTheme.colors;anchors.fill:parent;radius:14;color:r.c.primary80
@@ -716,28 +717,29 @@ QString buildAbout(const QString &developerName, const QString &tagline,
     // A plain Column, explicit 160x60 image bounds and the public ItemDelegate
     // replace the heavier nested Layouts/handmade link buttons. Identity strings
     // bind directly to Text; the unused hidden-list property is retired (empty
-    // numeric icon-map entries still hide tabs). This funds the *entire* glass
-    // material inside the two existing resource slots, even with thirteen PNG
-    // URLs and four links. No companion QML/script/DLL or new resource is needed.
+    // numeric icon-map entries still hide tabs). The selected-tab material fits
+    // the two existing resource slots, even with thirteen PNG URLs and four
+    // links. No companion QML/script/DLL or new resource is needed.
     //
     // About is eagerly loaded by the native Repeater even when its tab is hidden.
-    // v20 confines decoration to the owning generated shell/tab surfaces.
+    // v21 restores one FLAT, OPAQUE native primary80 across the complete window.
+    // Only the selected generated tab's fill may have a reflection. Never add
+    // a shell gradient/rim: the brighter frame around an inset dark page was
+    // the mismatch in the user's screenshot. Hover remains a flat quiet tint.
     // Every Loader is a HARD boundary: never enter any native page or the
     // Shaders controls, and never follow background/handle/popup pointers into
-    // lazy native parts or the global Overlay. The independent flat page/footer
-    // backing is not decorated. Native gradients, colors, geometry, validation,
-    // opacity and input remain exactly native. This removes a possible source
-    // of the reported transparency/triangles; it is not hardware root-cause
-    // proof. Layered items, unrelated windows and shared UiTheme stay untouched.
-    // Qt 5/6 represent unset gradient as null OR undefined: guard the Rectangle
-    // API and use == null. Existing gradients are never replaced.
-    // Keep the owned shell opaque, including first-tab paint. Defer the first
-    // pass until bindings settle (Qt 5 otherwise can leave a new gradient flat).
-    // The bounded visible-window timer only discovers new generated tab
-    // delegates, including Shaders' reorder, not native page/popup replacements.
-    // Tiny badges/separators remain unchanged. Bound both visited nodes and the
-    // queue to 4096; pause the Timer when the Settings window is hidden. Public
-    // QtQuick 2.15 only: no optional blur/effects/private implementation imports.
+    // lazy native parts or the global Overlay. Native gradients, colors,
+    // geometry, validation, opacity and input remain exactly native.
+    // The generated delegate has one opaque-color fill under its transparent
+    // outline; do not decorate the outline, badges or shell. A private runtime
+    // marker prevents duplicate factories. Each fill retains ONE owned Gradient
+    // and a binding selects it only at the existing selected opacity (.2).
+    // Switching tabs/hovering detaches/reuses it, not a per-frame allocation.
+    // Qt 5/6 represent unset gradient as null OR undefined; use == null.
+    // Defer first discovery until Loader bindings settle. The bounded,
+    // visible-window timer discovers only new generated tab delegates (including
+    // Shaders' reorder). Layered items, other windows and UiTheme stay untouched.
+    // Public QtQuick 2.15 only: no optional blur/private implementation imports.
     QString generated = QStringLiteral(R"QML(import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Window 2.15
@@ -752,7 +754,6 @@ property string pShortDisplayName:""
 property var bsiTabIcons:@@BSI_TAB_ICONS@@
 property var bsiTheme:UiTheme
 property var c:UiTheme.colors
-property color edge:Qt.rgba(c.primary10.r,c.primary10.g,c.primary10.b,.2)
 // BSI CUSTOMIZER: redesigned About page v1
 ScrollView{anchors.fill:parent;clip:true;contentWidth:availableWidth;contentHeight:d.height+24;background:null
 Column{id:d;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter;spacing:16;topPadding:16;bottomPadding:16
@@ -766,13 +767,14 @@ background:Rectangle{radius:10;color:parent.hovered?Qt.rgba(a.c.accentNormal.r,a
 Text{anchors{right:parent.right;rightMargin:14;verticalCenter:parent.verticalCenter}text:"\u2197";color:a.c.accentNormal;font.pixelSize:16}
 onClicked:if(/^https?:\/\//i.test(modelData.url))Qt.openUrlExternally(modelData.url)}}
 }}
-function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons;Qt.callLater(fGlassAll)}
+function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons;Qt.callLater(fGlassTabs)}
 function fCheckForUpdateCallback(s,d){if(s===0){var j=JSON.parse(d);pUpdateAvailable=/^true$/i.test(j.update_available);pIsInCompatibleUpdateVersion=pUpdateAvailable&&!/^true$/i.test(j.update_details.is_build_compatible);if(pUpdateAvailable){pUpdateVersion=j.update_details.client_version;pMoreInfoURL=j.update_details.detailed_changelogs_url;pDownloadURL=j.update_details.download_url}}else{pUpdateAvailable=false;pIsInCompatibleUpdateVersion=false}}
 function fUpdateShortDisplayName(n){pShortDisplayName=String(n||"")}
-Component{id:g;Gradient{property var s;property color c:s.color;GradientStop{color:!c.a&&s.border.color.a&&s.parent.containsMouse!==undefined?a.edge:Qt.lighter(c,1.7)}GradientStop{position:1;color:s.c===a.c?c:Qt.rgba(c.r,c.g,c.b,c.a*.88)}}}
-function fGlassAll(){var r=parent;while(r&&r.bIcons===undefined)r=r.parent;if(!r)return;var q=[r],n=0;while(q.length&&n++<4096){var o=q.pop();if(!o||o.minimumSize!==undefined||o.item!==undefined&&o.source!==undefined||o.layer&&o.layer.enabled)continue;if(o.border&&o.gradient==null&&(o.c===a.c||o.parent&&o.parent.containsMouse!==undefined)){o.gradient=g.createObject(o,{s:o});if(o.c===a.c)o.border.color=Qt.binding(()=>a.edge)}var c=o.children||[];for(var i=0;i<c.length&&q.length<4096;i++)q.push(c[i])}}
-Connections{target:a.Window.window;function onPCurrentTabIndexChanged(){fGlassAll()}}
-Timer{interval:160;running:a.Window.window&&a.Window.window.visible;repeat:true;onTriggered:fGlassAll()}
+Component{id:g;Gradient{property var s;property color c:s.color;GradientStop{color:Qt.lighter(c,1.7)}GradientStop{position:1;color:Qt.rgba(c.r,c.g,c.b,c.a*.88)}}}
+function fGlassTab(o){var v=g.createObject(o,{s:o});o.objectName='bsiTabGlass';o.gradient=Qt.binding(()=>o.opacity===.2?v:null)}
+function fGlassTabs(){var r=parent;while(r&&r.bIcons===undefined)r=r.parent;if(!r)return;var q=[r],n=0;while(q.length&&n++<4096){var o=q.pop();if(!o||o.minimumSize!==undefined||o.item!==undefined&&o.source!==undefined||o.layer&&o.layer.enabled)continue;if(o.border&&o.gradient==null&&o.parent&&o.parent.containsMouse!==undefined&&o.color.a&&o.objectName!=='bsiTabGlass')fGlassTab(o);var c=o.children||[];for(var i=0;i<c.length&&q.length<4096;i++)q.push(c[i])}}
+Connections{target:a.Window.window;function onPCurrentTabIndexChanged(){fGlassTabs()}}
+Timer{interval:160;running:a.Window.window&&a.Window.window.visible;repeat:true;onTriggered:fGlassTabs()}
 }
 )QML");
     generated.replace(QStringLiteral("@@BSI_DEVELOPER@@"), qDeveloper);
@@ -1015,7 +1017,8 @@ bool hasWindowMarker(const QString &text)
         || text.contains(kWindowDesignMarkerV13) || text.contains(kWindowDesignMarkerV14)
         || text.contains(kWindowDesignMarkerV15) || text.contains(kWindowDesignMarkerV16)
         || text.contains(kWindowDesignMarkerV17) || text.contains(kWindowDesignMarkerV18)
-        || text.contains(kWindowDesignMarkerV19) || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV19) || text.contains(kWindowDesignMarkerV20)
+        || text.contains(kWindowDesignMarker);
 }
 
 // Standalone Image sources do not inherit the QML/HTML text's currentColor.
@@ -1383,7 +1386,7 @@ State analyze(const QString &exePath)
             .arg(state.settingsPageCount).arg(state.settingsQmlResourceCount);
     }
     if (state.applied && !sources.window.text.contains(kWindowDesignMarker))
-        state.detail += QStringLiteral(" An older Settings design is installed; choose Update rebuilt Settings panel to apply the glass materials.");
+        state.detail += QStringLiteral(" An older Settings design is installed; choose Update rebuilt Settings panel for the opaque native theme and selected-tab-only glass.");
     if (ShaderSettingsSource::hasWindow(sources.window.text)) {
         state.restorable = false;
         state.detail += QStringLiteral(" Remove the dependent native Shaders integration before restoring the underlying Settings design.");
@@ -1886,7 +1889,7 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
                         .arg(referencedAssets);
     }
     return {{QStringLiteral("ok"), true},
-            {QStringLiteral("msg"), QStringLiteral("The glass Settings window, themed selected/hover tabs, native-control materials and customizable About page were applied. A selective recovery snapshot was saved; restart BlueStacks to see it.") + assetNote},
+            {QStringLiteral("msg"), QStringLiteral("The opaque native-themed Settings window, selected-tab-only glass and customizable About page were applied. Native page/control materials are unchanged. A selective recovery snapshot was saved; restart BlueStacks to see it.") + assetNote},
             {QStringLiteral("recovery"), result.value(QStringLiteral("id"))}};
 }
 

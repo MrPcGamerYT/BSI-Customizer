@@ -103,6 +103,14 @@ int main(int argc, char **argv)
         require(isolatedRepeat.ok && isolatedRepeat.alreadyApplied && isolatedRepeat.window == isolated.window,
                 QStringLiteral("v20 shader idempotence: ") + isolatedRepeat.error);
         glass.replace(QStringLiteral("//BSI v20"), QStringLiteral("//BSI v21"));
+        const auto flat = ShaderSettingsSource::prepare(player(), glass, counts);
+        require(flat.ok && flat.tabIndex == 12, QStringLiteral("flat-native-theme v21 shader integration: ") + flat.error);
+        require(ShaderSettingsSource::removeWindow(flat.window, &restored, &error) && restored == glass,
+                QStringLiteral("exact v21 shader removal: ") + error);
+        const auto flatRepeat = ShaderSettingsSource::prepare(flat.player, flat.window, counts);
+        require(flatRepeat.ok && flatRepeat.alreadyApplied && flatRepeat.window == flat.window,
+                QStringLiteral("v21 shader idempotence: ") + flatRepeat.error);
+        glass.replace(QStringLiteral("//BSI v21"), QStringLiteral("//BSI v22"));
         require(!ShaderSettingsSource::prepare(player(), glass, counts).ok,
                 QStringLiteral("unknown future Settings designs must not be guessed"));
     }

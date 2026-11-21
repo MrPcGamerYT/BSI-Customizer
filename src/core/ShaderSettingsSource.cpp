@@ -260,7 +260,8 @@ Plan prepare(const QString &player, const QString &window, const QHash<QString, 
     if ((!baseWindow.contains(QLatin1String("//BSI v17"))
          && !baseWindow.contains(QLatin1String("//BSI v18"))
          && !baseWindow.contains(QLatin1String("//BSI v19"))
-         && !baseWindow.contains(QLatin1String("//BSI v20")))
+         && !baseWindow.contains(QLatin1String("//BSI v20"))
+         && !baseWindow.contains(QLatin1String("//BSI v21")))
         || !baseWindow.contains(QLatin1String("property var bIcons:"))) {
         plan.error = QStringLiteral("Apply the current top-tab Settings-panel rebuild before installing the shader category.");
         return plan;

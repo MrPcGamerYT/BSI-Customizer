@@ -66,14 +66,14 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI v20" in replacement
+assert "BSI v21" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 # The About page publishes the hidden-tab list and the icon map to the shell.
 # It must find that shell by walking up: counting parents landed on the window
 # instead of the UiShadowContainer, which threw
 # "Cannot assign to non-existent property bHidden" and silently dropped every
 # custom tab icon (the file applied, nothing ever showed).
-assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons;Qt.callLater(fGlassAll)}" in cpp, \
+assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons;Qt.callLater(fGlassTabs)}" in cpp, \
     "the About page must walk up to the shell, not count parents"
 # One map now carries both icons and hidden sentinels. Retiring the unused
 # bHidden channel buys room for the selection effect in legacy resource slots.

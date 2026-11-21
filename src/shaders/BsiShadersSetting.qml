@@ -4,33 +4,34 @@ import QtQuick.Layouts 1.15
 import QtQuick.Window 2.15
 import QtQml.Models 2.15
 import BSIShaders 1.0
+// Resolve the SAME resource-backed controls used by native Settings pages.
+// They remain in the player; no OEM QML/assets or imitation theme are bundled.
+import "qrc:/" as Native
 
-Item {
+Rectangle {
     id: page
+    // Native pages are transparent Items over an opaque Settings surface.
+    // Own this flat page/footer backing too, including on a module-only update
+    // of an older Settings shell. Never gradient/layer/mask the content area.
+    color: bsiTheme.colors.primary80
     property string pParentWindow: "plr"
     property string pVmName: ""
     // This is the NATIVE model index, never its sorted visual position.
     property int bsiTabIndex: -1
     property var bsiPalette: null
     property font bsiFont: Qt.font({family: "Segoe UI", pixelSize: 14})
-    property var bsiTheme: null
+    property var bsiTheme: UiTheme
     property bool pCompLoaded: false
     property var draft: ({})
     property bool pEnableSave: differs()
     property string feedback: ""
     property bool saveFailed: false
     property bool keepCurrentDisplay: false
-    readonly property color textColor: look.text
-    readonly property color mutedColor: look.muted
-    readonly property color accent: look.accent
+    readonly property color textColor: bsiTheme.colors.primary10
+    readonly property color mutedColor: bsiTheme.colors.primary30
+    readonly property color accent: bsiTheme.colors.accentNormal
     readonly property int presetIndex: selectedPreset()
 
-    ShaderStyle {
-        id: look
-        nativeTheme: page.bsiTheme
-        fallbackPalette: page.bsiPalette
-        fallbackFont: page.bsiFont
-    }
     // DelegateModel reorders DISPLAY groups without mutating the native list or
     // its `index` role. About/custom/hidden icon indexes and native callbacks
     // therefore stay valid across install, update, reopen and exact removal.
@@ -42,29 +43,9 @@ Item {
         return host
     }
     function resolveStyle() {
-        var window = page.Window.window
-        var rows = window && window.pSettingsItems ? window.pSettingsItems.pSettingElements : []
-        for (var i = 0; i < rows.length; ++i) {
-            var about = rows[i].pComponentObj
-            if (about && about.objectName === "aboutSettings" && about.bsiTheme) {
-                // Do not round-trip a QObject palette through an OEM C++
-                // pComponentArgs map: some hosts serialize it to an empty map.
-                page.bsiTheme = Qt.binding(function() { return about.bsiTheme })
-                return
-            }
-        }
-        // Older shells still expose the palette on their own surface. Invalid
-        // or missing individual roles use readable defaults, never black text.
-        var host = settingsHost(), queue = host ? [host] : [], count = 0
-        while (queue.length && count++ < 2048) {
-            var item = queue.pop()
-            if (item.c && item.c.primary10 !== undefined && item.c.primary80 !== undefined) {
-                page.bsiPalette = Qt.binding(function() { return item.c })
-                return
-            }
-            var children = item.children || []
-            for (var j = 0; j < children.length && queue.length < 2048; ++j) queue.push(children[j])
-        }
+        // UiTheme is the player's live context object, also used inside the
+        // resource-backed native controls. No palette snapshots or substitutes.
+        bsiTheme = Qt.binding(function() { return UiTheme })
     }
     function arrangeTabs() {
         if (tabsArranged || bsiTabIndex < 0) return
@@ -185,18 +166,16 @@ Item {
         return response.ok
     }
 
-    ColumnLayout {
+    Native.UiColumnLayout {
         anchors.fill: parent
         spacing: 24
-        ScrollView {
+        Native.UiScrollView {
             id: scroll
             objectName: "shadersScroll"
             Layout.fillWidth: true; Layout.fillHeight: true
             // The layout sizes the viewport, not the entire scrollable form.
             implicitWidth: 0; implicitHeight: 0
             clip: true
-            ScrollBar.vertical: ShaderScrollBar { shaderStyle: look }
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
             contentItem: Flickable {
                 id: viewport
                 objectName: "shaderViewport"
@@ -212,7 +191,7 @@ Item {
                 function updateExtent() { contentHeight = Math.ceil(form.implicitHeight) + 20 }
                 Component.onCompleted: Qt.callLater(updateExtent)
                 onVisibleChanged: if (visible) Qt.callLater(updateExtent)
-                ColumnLayout {
+                Native.UiColumnLayout {
                     id: form
                     objectName: "shaderForm"
                     onImplicitHeightChanged: Qt.callLater(viewport.updateExtent)
@@ -220,28 +199,28 @@ Item {
                     spacing: 16
                     Text {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: qsTr("Visual effects"); color: look.text; font: look.bodyFont
+                        text: qsTr("Visual effects"); color: page.bsiTheme.colors.primary10; font: page.bsiTheme.fonts.bodyLarge
                     }
                     Text {
                         objectName: "shaderFeedback"
                         visible: !!page.feedback
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: page.feedback; color: page.saveFailed ? look.danger : look.secondary; font: look.smallFont
+                        text: page.feedback; color: page.saveFailed ? page.bsiTheme.colors.dangerNormal : page.bsiTheme.colors.primary20; font: page.bsiTheme.fonts.bodySmall
                     }
-                    RowLayout {
+                    Native.UiRowLayout {
                         Layout.fillWidth: true; spacing: 16
-                        ShaderCheckBox {
+                        Native.UiCheckBox {
                             objectName: "shaderEnabled"
-                            shaderStyle: look
+                            pSize: page.bsiTheme.checkBoxes.sizes.medium
                             Layout.fillWidth: true
                             text: qsTr("Enable visual effects")
                             checked: !!page.draft.enabled
                             onToggled: page.setValue("enabled", checked)
                         }
-                        ShaderButton {
+                        Native.UiButton {
                             objectName: "shaderEnhance"
-                            shaderStyle: look
-                            primary: page.presetIndex === 4
+                            pSize: page.bsiTheme.buttons.sizes.medium
+                            pColor: page.bsiTheme.buttons.colors.secondary
                             text: qsTr("Enhance")
                             Accessible.description: qsTr("Select balanced color, tonal contrast and detail enhancement. Save changes to apply. This is not ray tracing.")
                             onClicked: page.preset(4)
@@ -249,13 +228,13 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: qsTr("Preset"); color: look.text; font: look.bodyFont
+                        text: qsTr("Preset"); color: page.bsiTheme.colors.primary10; font: page.bsiTheme.fonts.bodyLarge
                     }
-                    RowLayout {
+                    Native.UiRowLayout {
                         Layout.fillWidth: true; spacing: 12
-                        ShaderComboBox {
+                        Native.UiComboBox {
                             objectName: "shaderPresets"
-                            shaderStyle: look
+                            pSize: page.bsiTheme.comboBoxes.sizes.medium
                             // Keep native-size buttons fully legible while the
                             // selector yields to wide fallback/translated text.
                             Layout.fillWidth: true; Layout.minimumWidth: 80
@@ -264,9 +243,10 @@ Item {
                             currentIndex: page.presetIndex
                             onActivated: page.preset(currentIndex)
                         }
-                        ShaderButton {
+                        Native.UiButton {
                             objectName: "shaderReset"
-                            shaderStyle: look
+                            pSize: page.bsiTheme.buttons.sizes.medium
+                            pColor: page.bsiTheme.buttons.colors.secondary
                             text: qsTr("Reset visuals"); onClicked: page.reset()
                         }
                         Item { Layout.fillWidth: true }
@@ -275,27 +255,27 @@ Item {
                         visible: !!page.draft.enabled && page.presetIndex === 0
                         Layout.fillWidth: true; wrapMode: Text.Wrap
                         text: qsTr("Neutral bypass: choose Enhance or a preset to change the image.")
-                        color: look.muted; font: look.smallFont
+                        color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                     }
-                    Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: page.bsiTheme.colors.seperator }
                     Text {
-                        objectName: "shaderPotatoHeading"
+                        objectName: "shaderResolutionHeading"
                         // An unwrapped heading becomes the ColumnLayout's
                         // minimum width and can push EVERY row past the clip.
                         // Font fallback and translations must wrap, not widen it.
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: qsTr("Potato graphics · native render size"); color: look.text; font: look.bodyFont
+                        text: qsTr("Render resolution (optional)"); color: page.bsiTheme.colors.primary10; font: page.bsiTheme.fonts.bodyLarge
                     }
                     Text {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: qsTr("Reduces the real native render resolution, independently of visual effects. Not texture-only LOD, geometry removal or a color preset.")
-                        color: look.muted; font: look.smallFont
+                        text: qsTr("Display resolution only. This is separate from the texture-detail Potato effect shown in the video; texture LOD is not implemented here.")
+                        color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                     }
-                    RowLayout {
+                    Native.UiRowLayout {
                         Layout.fillWidth: true; spacing: 12
-                        ShaderComboBox {
+                        Native.UiComboBox {
                             objectName: "shaderPotatoModes"
-                            shaderStyle: look
+                            pSize: page.bsiTheme.comboBoxes.sizes.medium
                             Layout.preferredWidth: 270; Layout.fillWidth: true
                             model: [qsTr("Native / restore original"), qsTr("Light · 720 px short edge"), qsTr("Strong · 540 px short edge")]
                             currentIndex: Number(page.draft.potatoMode || 0)
@@ -303,9 +283,10 @@ Item {
                             Accessible.description: qsTr("Change actual native Display framebuffer size. Only Save writes it, and a full player restart is required. This does not change texture LOD or FPS caps.")
                             onActivated: { page.keepCurrentDisplay = false; page.setValue("potatoMode", currentIndex) }
                         }
-                        ShaderButton {
+                        Native.UiButton {
                             objectName: "shaderPotatoKeep"
-                            shaderStyle: look
+                            pSize: page.bsiTheme.buttons.sizes.medium
+                            pColor: page.bsiTheme.buttons.colors.secondary
                             text: qsTr("Keep current display")
                             visible: Engine.display.available && (Engine.display.conflict || Engine.display.pending)
                             onClicked: { page.setValue("potatoMode", 0); page.keepCurrentDisplay = true }
@@ -316,37 +297,39 @@ Item {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
                         text: page.keepCurrentDisplay ? qsTr("Save to keep the current native Display size and forget the previous restore snapshot. No display value will be written.")
                             : Engine.display.available ? Engine.previewPotato(Number(page.draft.potatoMode || 0)).msg : Engine.display.detail
-                        color: look.secondary; font: look.smallFont
+                        color: page.bsiTheme.colors.primary20; font: page.bsiTheme.fonts.bodySmall
                     }
                     Text {
                         objectName: "shaderPotatoStatus"
                         visible: Engine.display.available
                         Layout.fillWidth: true; wrapMode: Text.Wrap
                         text: qsTr("Configured native Display: ") + Engine.display.width + " × " + Engine.display.height + "\n" + Engine.display.detail
-                        color: look.muted; font: look.smallFont
+                        color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                     }
-                    Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: page.bsiTheme.colors.seperator }
                     Repeater {
                         model: Engine.controls
-                        delegate: ColumnLayout {
+                        delegate: Native.UiColumnLayout {
                             id: group
                             property var controlData: modelData
                             Layout.fillWidth: true; spacing: 4
-                            RowLayout {
+                            Native.UiRowLayout {
                                 Layout.fillWidth: true; spacing: 12
                                 Text {
                                     Layout.fillWidth: true; elide: Text.ElideRight
-                                    text: group.controlData.label; color: look.text; font: look.bodyFont
+                                    text: group.controlData.label; color: page.bsiTheme.colors.primary10; font: page.bsiTheme.fonts.bodyLarge
                                 }
                                 Text {
                                     objectName: "shaderValueLabel-" + group.controlData.key
                                     Layout.minimumWidth: 32
                                     horizontalAlignment: Text.AlignRight
-                                    text: Math.round(valueSlider.value).toString(); color: look.secondary; font: look.smallFont
+                                    text: Math.round(valueSlider.value).toString(); color: page.bsiTheme.colors.primary20; font: page.bsiTheme.fonts.bodySmall
                                 }
-                                ShaderButton {
+                                Native.UiButton {
                                     objectName: "shaderControlReset-" + group.controlData.key
-                                    shaderStyle: look; quiet: true
+                                    pSize: page.bsiTheme.buttons.sizes.small
+                                    pColor: page.bsiTheme.buttons.colors.transparent
+                                    opacity: enabled ? 1 : 0.4
                                     Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
                                     text: qsTr("Reset")
                                     enabled: Number(page.draft[group.controlData.key] || 0) !== 0
@@ -361,9 +344,9 @@ Item {
                                     }
                                 }
                             }
-                            ShaderSlider {
+                            Native.UiSlider {
                                 id: valueSlider
-                                shaderStyle: look
+                                pSize: page.bsiTheme.sliders.sizes.medium
                                 objectName: "shaderValue-" + group.controlData.key
                                 Layout.fillWidth: true
                                 from: group.controlData.minimum; to: group.controlData.maximum; stepSize: 1
@@ -373,17 +356,17 @@ Item {
                             }
                         }
                     }
-                    Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: page.bsiTheme.colors.seperator }
                     Text {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: qsTr("Rendering status"); color: look.text; font: look.bodyFont
+                        text: qsTr("Rendering status"); color: page.bsiTheme.colors.primary10; font: page.bsiTheme.fonts.bodyLarge
                     }
                     Text {
                         objectName: "shaderRendererStatus"
                         Layout.fillWidth: true; wrapMode: Text.Wrap
                         text: qsTr("Requested API: ") + Engine.metrics.requestedRenderer + "\n"
                             + qsTr("Observed game API: ") + Engine.metrics.renderer + "\n" + Engine.metrics.status
-                        color: Engine.metrics.active ? look.accent : look.muted; font: look.smallFont
+                        color: Engine.metrics.active ? page.bsiTheme.colors.accentNormal : page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                     }
                     Text {
                         objectName: "shaderFrameCounter"
@@ -391,7 +374,7 @@ Item {
                         text: qsTr("Processed game frames: ") + Engine.metrics.processedFrames
                             + qsTr(" · Game surface observed: ") + (Engine.metrics.gameSurfaceObserved ? qsTr("yes") : qsTr("no"))
                             + qsTr(" · Processing active: ") + (Engine.metrics.active ? qsTr("yes") : qsTr("no"))
-                        color: look.muted; font: look.smallFont
+                        color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                     }
                     Text {
                         objectName: "shaderCaptureDetails"
@@ -401,23 +384,25 @@ Item {
                             + Engine.metrics.vulkanLoaders + qsTr(" loaders · ") + Engine.metrics.vulkanInstances + qsTr(" instances · ")
                             + Engine.metrics.vulkanDevices + qsTr(" devices · ") + Engine.metrics.vulkanSurfaces + qsTr(" Win32 surfaces · ")
                             + Engine.metrics.vulkanSwapchains + qsTr(" swapchains · ") + Engine.metrics.vulkanPresents + qsTr(" presents")
-                        color: look.muted; font: look.smallFont
+                        color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                     }
-                    ShaderButton {
+                    Native.UiButton {
                         objectName: "shaderCopyStatus"
-                        shaderStyle: look; text: qsTr("Copy rendering status")
+                        pSize: page.bsiTheme.buttons.sizes.medium
+                        pColor: page.bsiTheme.buttons.colors.secondary
+                        text: qsTr("Copy rendering status")
                         onClicked: Engine.copyDiagnostics()
                     }
                     Text {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: qsTr("Enhance is a balanced color and detail preset, not ray tracing. Tonal pop is not HDR display output. Unsupported or protected surfaces are left untouched. Experimental; actual GPU/driver validation is incomplete. Native Potato size needs a restart and is not a texture override. No FPS-cap or driver-profile tweaks.")
-                        color: look.muted; font: look.smallFont
+                        text: qsTr("Enhance changes color and detail, not ray tracing or game texture LOD. Unsupported or protected surfaces are left untouched. Experimental; GPU/driver validation is incomplete. Optional resolution changes need a restart. No FPS-cap or driver-profile tweaks.")
+                        color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                     }
                     Text {
                         objectName: "shaderError"
                         visible: !!Engine.error
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: Engine.error; color: look.danger; font: look.smallFont
+                        text: Engine.error; color: page.bsiTheme.colors.dangerNormal; font: page.bsiTheme.fonts.bodySmall
                     }
                 }
             }
@@ -425,21 +410,32 @@ Item {
         // Match native Settings: one stationary, right-aligned Save button.
         // It remains visible at 40% opacity when clean. Discard belongs to the
         // existing native tab/close prompt, not a second permanent footer action.
-        RowLayout {
+        Native.UiRowLayout {
             objectName: "shaderFooter"
             Layout.fillWidth: true
             Layout.minimumHeight: 36; Layout.preferredHeight: 36; Layout.maximumHeight: 36
             spacing: 4
+            Native.UiImage {
+                objectName: "shaderFooterInfo"
+                asset: "MenuInfo"
+                // UiImage's relative asset string otherwise resolves against
+                // THIS module's /bsi-shaders URL rather than the player's root.
+                source: "qrc:/qrcAssets/MenuInfo.svg"
+                pImageWidth: 12; pImageHeight: 12
+            }
             Text {
                 Layout.fillWidth: true; elide: Text.ElideRight
                 text: Number(page.draft.potatoMode || 0) !== Number(Engine.saved.potatoMode || 0)
                     ? qsTr("Render size needs a player restart") : qsTr("Effects apply after saving")
-                color: look.secondary; font: look.smallFont
+                color: page.bsiTheme.colors.primary20; font: page.bsiTheme.fonts.bodySmall
             }
-            ShaderButton {
-                objectName: "shaderSave"; shaderStyle: look; primary: true
+            Native.UiButton {
+                objectName: "shaderSave"
+                pSize: page.bsiTheme.buttons.sizes.medium
+                pColor: page.bsiTheme.buttons.colors.accent
+                opacity: page.pEnableSave ? 1 : 0.4
                 Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                text: qsTr("Save changes"); enabled: page.pEnableSave; onClicked: page.save()
+                text: qsTranslate("QObject", "Save changes"); enabled: page.pEnableSave; onClicked: page.save()
             }
         }
     }

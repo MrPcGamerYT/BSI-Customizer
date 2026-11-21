@@ -12,6 +12,7 @@ pointer/wheel/key input and receives rendered Qt frames (not an HTML remake).
 import argparse
 import atexit
 import hashlib
+import importlib.util
 import uuid
 import http.server
 import json
@@ -109,6 +110,7 @@ class SettingsPreview:
     def __init__(self, page_source=None, about_links=(), shader_module=None):
         self._closed = False
         self.profile = None
+        self.native_ui_cleanup = None
         self.shader_module = Path(shader_module).resolve() if shader_module else None
         self.labels = LABELS + (["Shaders"] if self.shader_module else [])
         if self.shader_module:
@@ -139,7 +141,18 @@ class SettingsPreview:
             "singleton UiTheme 1.0 UiTheme.qml\n"
             "UiShadowContainer 1.0 UiShadowContainer.qml\n"
             "UiImageButton 1.0 UiImageButton.qml\n")
-        (module / "UiTheme.qml").write_text(THEME)
+        if self.shader_module:
+            # The production module now delegates to the player's root-QRC
+            # controls/full live theme. This preview has no player resources:
+            # use the same explicitly authored contracts as standalone tests,
+            # never resurrect the removed Shader* lookalikes or export OEM QML.
+            spec = importlib.util.spec_from_file_location("preview_native_ui", REPO / "tests/shaders/native_ui_fixture.py")
+            native_ui = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(native_ui)
+            theme_source = native_ui.theme_source(singleton=True)
+        else:
+            theme_source = THEME
+        (module / "UiTheme.qml").write_text(theme_source)
         # Match the native 15 px shadow inset and redirected default children.
         (module / "UiShadowContainer.qml").write_text("""import QtQuick 2.15
 Item {
@@ -277,6 +290,14 @@ Window {
         self.player.setGeometry(0, 0, 1440, 900)
         self.engine.rootContext().setContextProperty("fixturePlayer", self.player)
         self.engine.rootContext().setContextProperty("previewBridge", self.bridge)
+        if self.shader_module:
+            assert not os.environ.get("BSI_SHADERS_NATIVE_UI_DIR"), "the shareable live preview uses authored services, not exported player assets"
+            carrier_component = QQmlComponent(self.engine)
+            carrier_component.setData(b'import QtQml 2.15; import BsiGuiFixture 1.0; QtObject { property QtObject theme: UiTheme }', QUrl("PreviewTheme.qml"))
+            self.theme_carrier = carrier_component.create()
+            assert self.theme_carrier is not None, [e.toString() for e in carrier_component.errors()]
+            self.theme_carrier.setParent(self.engine)
+            _, self.native_ui_cleanup = native_ui.install(self.engine, root, theme=self.theme_carrier.property("theme"))
         self.warnings = []
         self.engine.warnings.connect(lambda errors: self.warnings.extend(e.toString() for e in errors))
         self.component = QQmlComponent(self.engine, QUrl.fromLocalFile(str(path)))
@@ -325,6 +346,9 @@ Window {
         QTest.qWait(20)
         if self.profile is not None:
             self.profile.unlink(missing_ok=True)
+        if self.native_ui_cleanup:
+            self.native_ui_cleanup()
+            self.native_ui_cleanup = None
         self.directory.cleanup()
 
     def frame(self):

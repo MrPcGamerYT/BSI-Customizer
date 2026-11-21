@@ -4,6 +4,16 @@
 #include <QStringList>
 
 namespace ShaderSettingsFixture {
+// Namespace-only fixtures. The actual control implementations/theme are tested
+// separately from read-only, hash-pinned player resources, never copied here.
+inline const QStringList nativeControls{
+    QStringLiteral("UiThemeObject.qml"), QStringLiteral("UiButton.qml"),
+    QStringLiteral("UiColumnLayout.qml"), QStringLiteral("UiRowLayout.qml"),
+    QStringLiteral("UiCheckBox.qml"), QStringLiteral("UiComboBox.qml"),
+    QStringLiteral("UiSlider.qml"), QStringLiteral("UiScrollView.qml"),
+    QStringLiteral("UiScrollBar.qml"), QStringLiteral("UiImage.qml"),
+    QStringLiteral("UiTextField.qml")
+};
 inline const QStringList pages{
     QStringLiteral("UiPerformanceSetting.qml"), QStringLiteral("UiDisplaySetting.qml"),
     QStringLiteral("UiGraphicsSetting.qml"), QStringLiteral("PlrGameSetting.qml"),

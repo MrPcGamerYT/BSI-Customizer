@@ -51,7 +51,7 @@ bool decodeValues(const QVariantMap &map,ShaderSavedConfiguration *c,QString *er
             return refuse(error,QStringLiteral("Shader values must be finite integer steps in their supported ranges."));
     int mode=0;
     if(!legacy&&!integer(map.value(QStringLiteral("potatoMode")),0,2,&mode))
-        return refuse(error,QStringLiteral("Potato mode must be Native, Light or Strong."));
+        return refuse(error,QStringLiteral("Resolution mode must be Native, Light or Strong."));
     c->potato=PotatoMode(mode);return true;
 }
 QJsonObject resolutionJson(const DisplayResolution &r){return {{QStringLiteral("width"),r.width},{QStringLiteral("height"),r.height},{QStringLiteral("custom"),r.custom}};}
@@ -83,13 +83,13 @@ bool decodeConfig(const QJsonObject &root,ShaderSavedConfiguration *c,ShaderDisp
         if(!root.value(QStringLiteral("display")).isObject())return refuse(error,QStringLiteral("Invalid native Display recovery metadata."));
         const auto display=root.value(QStringLiteral("display")).toObject();
         if(c->potato==PotatoMode::Native){
-            if(!display.isEmpty())return refuse(error,QStringLiteral("Native Potato mode must not carry an active resolution override."));
+            if(!display.isEmpty())return refuse(error,QStringLiteral("Native resolution mode must not carry an active override."));
         }else{
             if(display.size()!=2||!decodeResolution(display.value(QStringLiteral("original")),&c->original)
                ||!decodeResolution(display.value(QStringLiteral("target")),&c->target))
                 return refuse(error,QStringLiteral("The saved original/target display sizes are invalid; automatic restoration is refused."));
             const auto plan=planPotatoResolution(c->potato,c->original);
-            if(!plan.reduced||plan.target!=c->target)return refuse(error,QStringLiteral("The saved Potato target does not match its bounded native-resolution plan."));
+            if(!plan.reduced||plan.target!=c->target)return refuse(error,QStringLiteral("The saved render-resolution target does not match its bounded plan."));
         }
     }
     if(journal){
@@ -149,9 +149,9 @@ bool ShaderPreferences::reconcile(QString *error){
     if(!pending.active)return true;
     DisplayResolution current;bool modified=false;
     if(!nativeDisplay.read(&current,error)||!nativeDisplay.modified(&modified,error))return false;
-    if(modified)return refuse(error,QStringLiteral("An interrupted Potato save and native unsaved settings are present. Use the player's native Discard/Save first; no unrelated draft will be committed or discarded by Shaders."));
+    if(modified)return refuse(error,QStringLiteral("An interrupted resolution save and native unsaved settings are present. Use the player's native Discard/Save first; no unrelated draft will be committed or discarded by Shaders."));
     if(current!=pending.before&&current!=pending.target)
-        return refuse(error,QStringLiteral("Native Display differs from both sides of an interrupted Potato save. Choose Keep current display, then Save, or restore the known size in Display. No resolution is guessed."));
+        return refuse(error,QStringLiteral("Native Display differs from both sides of an interrupted resolution save. Choose Keep current display, then Save, or restore the known size in Display. No resolution is guessed."));
     const auto resolved=current==pending.target?pending.next:saved;
     if(!persist(resolved,{},error))return false;
     saved=resolved;pending={};displayDetail.clear();return true;
@@ -174,7 +174,7 @@ QVariantMap ShaderPreferences::displayStatus()const{
     const bool conflict=available&&saved.potato!=PotatoMode::Native&&current!=saved.target;
     QString detail=readable?displayDetail:lastError;
     if(detail.isEmpty()){
-        if(!available)detail=QStringLiteral("Native Display backend unavailable. Potato is disabled here; visual effects still work independently.");
+        if(!available)detail=QStringLiteral("Native Display backend unavailable. Render resolution changes are disabled here; visual effects still work independently.");
         else if(pending.active)detail=QStringLiteral("Pending native Display save needs reconciliation. No live rendering result or successful restore is claimed.");
         else if(conflict)detail=QStringLiteral("Display changed outside this profile. Keep the current display explicitly before replacing/forgetting its old restore snapshot; newer settings will not be overwritten.");
         else if(restartRequired)detail=QStringLiteral("Native render size saved. Fully restart the player to use it; the current running game's size has not been measured.");
@@ -189,7 +189,7 @@ QVariantMap ShaderPreferences::displayStatus()const{
 QVariantMap ShaderPreferences::previewPotato(int mode)const{
     const auto fail=[](const QString &message){return QVariantMap{{"ok",false},{"msg",message}};};
     DisplayResolution current;QString error;
-    if(mode<0||mode>2)return fail(QStringLiteral("Unknown Potato mode."));
+    if(mode<0||mode>2)return fail(QStringLiteral("Unknown resolution mode."));
     if(!readable)return fail(lastError);
     if(!nativeDisplay.read(&current,&error))return fail(displayDetail.isEmpty()?error:displayDetail);
     if(pending.active)return fail(QStringLiteral("Resolve the interrupted native Display save before selecting another profile."));
@@ -237,7 +237,7 @@ QVariantMap ShaderPreferences::apply(const QVariantMap &input,bool keepCurrentDi
     if(!nativeChange){
         if(!persist(next,{},&error))return fail(error);
         saved=next;pending={};lastError.clear();displayDetail.clear();
-        return {{"ok",true},{"msg",keepCurrentDisplay?QStringLiteral("Current native display kept; the old Potato restore snapshot was cleared. No display setting was written."):QStringLiteral("Shader settings saved.")}};
+        return {{"ok",true},{"msg",keepCurrentDisplay?QStringLiteral("Current native display kept; the old resolution restore snapshot was cleared. No display setting was written."):QStringLiteral("Shader settings saved.")}};
     }
     ShaderDisplayPending transaction;transaction.active=true;transaction.before=before;transaction.target=target;transaction.next=next;
     // The old preferences plus BOTH native sizes are durable application-level
@@ -256,7 +256,7 @@ QVariantMap ShaderPreferences::apply(const QVariantMap &input,bool keepCurrentDi
     if(!nativeDisplay.commit(&error)||!nativeDisplay.read(&actual,&error)||actual!=target
        ||!nativeDisplay.modified(&modified,&error)||modified){
         if(error.isEmpty())error=QStringLiteral("The native Display commit did not produce a clean, exact configured size.");
-        return fail(error+QStringLiteral(" Pending recovery retained. No visual settings were activated; do not treat this as a successful Potato save."));
+        return fail(error+QStringLiteral(" Pending recovery retained. No visual settings were activated; do not treat this as a successful resolution save."));
     }
     restartRequired=true;
     if(!persist(next,{},&error))return fail(QStringLiteral("Native render size was submitted successfully; restart is required, but preference finalization failed. Recovery is retained. ")+error);

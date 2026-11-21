@@ -29,32 +29,37 @@ To run only the safe-copy backend check and skip opening the GUI, add `-NoLaunch
 
 ## What the rebuilt window should look like
 
-The rebuilt shell (`BSI v20`) keeps the player's own tab model and pages in a rounded **glass-styled** window. The latest annotated screenshot asks to remove excess side space without making the dialog square. The chosen layout is **750 × 470 visible pixels**, or **780 × 500 logical pixels** including the unchanged native 15 px transparent shadow on each side, centered on the player. This is a layout target, not an exact pixel measurement of the annotations. The native page remains 568 px wide, with equal **91 px gutters** at the cap. Smaller viewports retain the existing 96% width / 94% height clamps; physical pixels scale with the player's DPI.
+The rebuilt shell (`BSI v21`) keeps the player's own tab model and pages in a rounded **flat, opaque native-themed** window. Glass is restricted to the selected navigation tab, not the frame, pages, footer, controls or hovered tabs. The latest annotated screenshot asks to remove excess side space without making the dialog square. The chosen layout is **750 × 470 visible pixels**, or **780 × 500 logical pixels** including the unchanged native 15 px transparent shadow on each side, centered on the player. This is a layout target, not an exact pixel measurement of the annotations. The native page remains 568 px wide, with equal **91 px gutters** at the cap. Smaller viewports retain the existing 96% width / 94% height clamps; physical pixels scale with the player's DPI.
 
 The user explicitly chose **horizontal top tabs**, not the reference's sidebar. The selected tab has a full-opacity outline and a soft rounded background, with its label **and actual icon** following the player's selected-tab color (`subWindowHeaderClick`). Hover uses a quieter background without changing selection. Unselected custom icons retain their original colors; selection tints their alpha silhouette without modifying the stored SVG/PNG. The rest of the native palette, fonts, controls and page column (up to 568 px), scrolling, footer and callbacks are retained. There is no additional page-content card. Earlier rebuilds remain recognizable for update/restore.
 
-The shell/tab glass is part of the **actual generated player resources**, not
-just the Customizer illustration. **v20 changes the material boundary in
-response to actual-player transparency and stretched-triangle reports**: all
-native pages, control backgrounds, slider parts, indicators and Overlay popups
-retain their own original materials. The Shaders module also uses flat owned
-control surfaces. No runtime pass enters a page Loader or follows native
-`background`, `handle` or `popup` pointers. The whole page/footer column now has
-an independent flat opaque backing, not a new rounded content card. The title,
-6 px tab corners, palette, 750×470 geometry and native callbacks remain.
+The selected-tab effect is part of the **actual generated player resources**,
+not just the Customizer illustration. The user confirmed the newer screenshot
+was no longer transparent, but its brighter outer gradient still framed a dark
+inset native page. **v21 removes that window-wide gradient/rim entirely.** The
+frame, title/tab surroundings, gutters and page/footer backing now paint the
+same live `UiTheme.colors.primary80`, so no inset color mismatch is introduced.
 
-About still hosts the small shell/tab gradient factory for resource-budget
-reasons. Its bounded visible-window pass only discovers the generated shell
-and tab delegates, including Shaders' reorder; page Loaders and layered items
-are hard boundaries. The outer shell remains opaque. About artwork stays
-within 160×60 and its flat link controls retain their original input behavior.
-This is a conservative mitigation, **not a confirmed physical-GPU root cause
-or proof that the installed player's scene-graph bug is resolved**.
+Native pages, control backgrounds, slider parts, indicators and Overlay popups
+retain their own original materials. The Shaders module imports the actual
+stock controls and full live theme, not painted lookalikes. No pass enters a
+page Loader or follows native `background`, `handle` or `popup` pointers. The
+independent page/footer backing stays flat and opaque, not a rounded content
+card. The title, 6 px tab corners, 750×470 geometry and native callbacks remain.
+
+About hosts the small **selected-tab-only** gradient factory for resource-budget
+reasons. A discovered generated tab fill owns one reusable material, attached
+only while selected; an unselected/hovered tab has **no Gradient**. The bounded
+visible-window discovery pass cannot decorate the frame. Page Loaders and
+layered items stay hard boundaries. About artwork remains within 160×60 and its
+flat link controls retain their input behavior. The source/Qt tests below do
+not certify the installed player's physical-GPU scene graph or game hooks.
 
 In the patched window, check that:
 
-- the shell and selected/hover tabs retain the glass finish, while **every native
-  page and its controls remain opaque/undistorted**; visit all middle tabs, open
+- the full frame/page/footer share one **flat, opaque native-theme background**;
+  **only the selected tab** reflects light, while hover stays flat and every
+  native page/control remains undistorted; visit all middle tabs, open
   combo popups, drag sliders repeatedly, scroll, resize, edit fields and Save;
 - with a moving/high-contrast game behind Settings, no page or footer reveals it;
   no stretched triangles appear while sliders move or their content is clipped;
@@ -78,9 +83,9 @@ On a narrow player window the centered page column shrinks with the window (48 p
 
 The automated `settings_panel_post_patch_gui_test.py` runs the **same assertions in Qt 6 and Qt 5**, measuring the actual generated Text and hit targets for all twelve tabs: multiple fonts (including italic), translations, badges, default/custom/missing icons, consecutive hidden tabs, reference/desktop/narrow players and both sides of the size-cap breakpoints. It executes the production sizing helper on a real transient window and checks the exact 750 × 470 visible frame, native 15 px inset, unchanged 568 px page, symmetric 91 px gutters at the cap, 12 px page gap, footer and scrolling. It scrolls to and physically clicks every tab (alternating label/icon-area clicks), then tests hover, live theme changes and the **painted icon/background pixels**. Assertions check that the selected PNG is truly recolored and its original custom colors return when deselected. This is an offscreen Qt Quick test, not an HD-Player/VM session.
 
-`settings_panel_window_budget_test.py` reconstructs the **entire** legacy Settings resource, including its original callback prefix and the sizing helper. Counting shell-template bytes is not a reliable compression budget. Apply removes redundant horizontal whitespace beside safe punctuation/operators as well as leading indentation, retaining literals, notices, every line ending and JS statement boundary; ambiguous regex/template fragments are left unchanged. Token/Qt regressions protect operator separation, callbacks and quoted line continuations. The complete v20 fixture uses **2434 / 2468 bytes**, retaining 34 bytes of headroom (the test still requires at least 32). Hidden tabs still use the numeric icon-map empty sentinel; the unused separate `bHidden` channel was retired to make room for the new styling. The Windows engine suite additionally patches disposable copies of the real player references.
+`settings_panel_window_budget_test.py` reconstructs the **entire** legacy Settings resource, including its original callback prefix and the sizing helper. Counting shell-template bytes is not a reliable compression budget. Apply removes redundant horizontal whitespace beside safe punctuation/operators as well as leading indentation, retaining literals, notices, every line ending and JS statement boundary; ambiguous regex/template fragments are left unchanged. Token/Qt regressions protect operator separation, callbacks and quoted line continuations. The complete v21 fixture uses **2434 / 2468 bytes**, retaining 34 bytes of headroom (the test still requires at least 32). Hidden tabs still use the numeric icon-map empty sentinel; the unused separate `bHidden` channel was retired to make room for the new styling. The Windows engine suite additionally patches disposable copies of the real player references.
 
-`settings_panel_glass_test.py` additionally loads the **unmodified generated shell and About material together**, on independent Qt 5 and Qt 6 hosts. It checks rendered reflections and real compositing over a contrasting sibling (software captures are RGB32, so PNG alpha alone is not evidence), selected/hover surfaces and full-color outlines. Authored page contracts exercise Loader-backed buttons, asset-based indicators, sliders, text editing/validation, disabled transparent controls, existing gradients, combo popups reparented to the Overlay, native activation, light/dark/accent rebinding, all twelve pages, no native material mutation (including lazy background replacements and
+`settings_panel_glass_test.py` additionally loads the **unmodified generated shell and About material together**, on independent Qt 5 and Qt 6 hosts. It requires exact native-theme pixels across frame/page/footer over a contrasting sibling (software captures are RGB32, so PNG alpha alone is not evidence), a strict rendered reflection only on the selected tab, no Gradient on hover, and full-color outlines. Five DPI runs plus four strict negatives reject both flattened selected-tab reflections and a lighter frame/darker-page mismatch. Authored page contracts exercise Loader-backed buttons, asset-based indicators, sliders, text editing/validation, disabled transparent controls, existing gradients, combo popups reparented to the Overlay, native activation, light/dark/accent rebinding, all twelve pages, no native material mutation (including lazy background replacements and
 Overlay popups) and no hidden-window timer work. The page/footer backing is
 sampled over two contrasting simulated-game colors, not only the shell gutter.
 The material must not touch unrelated siblings. These are real Qt pixels/inputs but **not OEM-player/game verification**.

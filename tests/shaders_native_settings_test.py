@@ -95,7 +95,7 @@ QtObject {
 QtObject { default property list<QtObject> pSettingElements }
 ''',
         "DialogButtonModel": '''import QtQuick 2.15
-QtObject { property string pText: ""; property color pColor: "transparent"; signal clicked() }
+QtObject { property string pText: ""; property var pColor: null; signal clicked() }
 ''',
         "DialogButtonModelList": '''import QtQml 2.15
 QtObject { property list<QtObject> pButtons }
@@ -145,30 +145,8 @@ QtObject {
 }
 ''',
     }
-    theme = '''pragma Singleton
-import QtQuick 2.15
-QtObject {
- property QtObject colors:QtObject{
- property color primary10:"#f4f7fb"
- property color primary20:"#d2dae4"
- property color primary30:"#a9adba"
- property color primary60:"#35465a"
- property color primary80:"#101a27"
- property color accentNormal:"#54c8ff"
- property color subWindowHeaderClick:"#54c8ff"
- property color dangerNormal:"#ee3344"
- }
- property QtObject fonts:QtObject{
- property font bodyLarge:Qt.font({pixelSize:17})
- property font bodyMedium:Qt.font({pixelSize:14})
- property font bodySmall:Qt.font({pixelSize:12})
- }
- property QtObject buttons:QtObject{property QtObject colors:QtObject{
- property color danger:"#ee3344"
- property color secondary:"#35465a"
- }}
-}
-'''
+    from shaders.native_ui_fixture import theme_source
+    theme = theme_source(singleton=True)
     qmldir = "module BsiNativeFixture\nsingleton UiTheme 1.0 UiTheme.qml\n"
     for name, source in declarations.items():
         (module / (name + ".qml")).write_text(source)
@@ -228,6 +206,17 @@ def main():
         subprocess.run([str(planner), "--emit", str(directory), str(source_path)], check=True)
         engine = QQmlEngine()
         engine.setImportPathList(([str(module_root)] if not missing else []) + [str(directory), runtime_qml, "qrc:/qt-project.org/imports", "qrc:/qt/qml"])
+        # The native pages and module must see the SAME live singleton/context
+        # theme, not two independently authored lookalike palettes.
+        theme_component = QQmlComponent(engine)
+        theme_component.setData(b'import QtQml 2.15; import BsiNativeFixture 1.0; QtObject { property QtObject selectedTheme: UiTheme }', QUrl.fromLocalFile(str(directory / "ThemeHost.qml")))
+        assert theme_component.status() == QQmlComponent.Status.Ready, [e.toString() for e in theme_component.errors()]
+        theme_holder = theme_component.create()
+        assert theme_holder, [e.toString() for e in theme_component.errors()]
+        theme_holder.setParent(engine)
+        from shaders.native_ui_fixture import install as install_native_ui
+        native_theme, unregister_native_ui = install_native_ui(engine, directory, theme_holder.property("selectedTheme"))
+        cleanup.callback(unregister_native_ui)
         warnings = []
         engine.warnings.connect(lambda errors: warnings.extend(e.toString() for e in errors))
         backend = Backend("NativeFixture-" + uuid.uuid4().hex)
@@ -405,11 +394,18 @@ def main():
             combo = named(page, "shaderPresets")
             slider = named(page, "shaderValue-saturation")
             check = named(page, "shaderEnabled")
-            assert evaluate(combo, "background.gradient == null"), "the combo must use the owned flat surface, not native restyling"
-            assert evaluate(slider, "handle.gradient == null"), "moving slider handles must stay on the flat paint path"
-            assert evaluate(check, "indicator.radius") == 2
+            assert combo.property("bsiFixtureKind") == "UiComboBox"
+            assert slider.property("bsiFixtureKind") == "UiSlider"
+            assert check.property("bsiFixtureKind") == "UiCheckBox"
+            assert evaluate(combo, "pSize === UiTheme.comboBoxes.sizes.medium")
+            assert evaluate(slider, "pSize === UiTheme.sliders.sizes.medium")
+            assert evaluate(check, "pSize === UiTheme.checkBoxes.sizes.medium")
+            native_save = named(page, "shaderSave")
+            assert native_save.property("bsiFixtureKind") == "UiButton"
+            assert evaluate(native_save, "pSize === UiTheme.buttons.sizes.medium && pColor === UiTheme.buttons.colors.accent")
+            assert evaluate(native_save, "pColor.normal.borderGradient != null"), "the real theme's button-border material must not be flattened or replaced"
             evaluate(about, "UiTheme.colors.accentNormal = '#ab5544'")
-            assert evaluate(combo, "String(shaderStyle.accent)") == "#ab5544"
+            assert evaluate(page, "String(bsiTheme.colors.accentNormal)") == "#ab5544"
             evaluate(about, "UiTheme.colors.accentNormal = '#54c8ff'")
             QTest.qWait(50)
             assert evaluate(page, "viewport.contentHeight === Math.ceil(form.implicitHeight) + 20"), "native themed scroll extent did not settle"

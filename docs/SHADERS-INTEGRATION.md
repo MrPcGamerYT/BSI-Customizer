@@ -42,8 +42,9 @@ verified identities, the observed 1.5/3.0 OpenGL texture-LOD behavior, compatibi
 risks and Visual Studio build instructions for the existing regular module.
 It contains no source/license and has not been executed or incorporated. No
 texture-only Potato mode or NVIDIA Profile Inspector startup-conflict fix is
-implemented. A separate, independently authored **native render-size Potato**
-control is now wired into Shaders: see [implementation, rationale and safety](POTATO-NATIVE-RESOLUTION.md).
+implemented. The separate **Render resolution (optional)** control is a Display
+convenience, **not completion or a visual match of the requested Potato effect**:
+see [implementation and safety](POTATO-NATIVE-RESOLUTION.md).
 It lowers the real native Display configuration (Save + restart), not texture
 LOD, and is not proof of a live game-resolution/FPS improvement. The archive
 report distinguishes observed binary behavior from the still-unreproduced
@@ -89,7 +90,12 @@ or `vulkan-1.dll`. The existing arbitrary startup-DLL feature remains separate.
 - Standalone experimental Qt plugin, native C++ settings bridge, bounded shader
   values, atomic per-instance persistence, and a Shaders QML page with
   presets, individual/visual reset, Save/Discard and renderer diagnostics.
-- Independent **Potato graphics · native render size**: typed public Display
+- Actual stock controls and live full `UiTheme`, imported from the player's
+  registered `qrc:/` resources. There are no bundled `Shader*` control lookalikes.
+  Save is the same native medium/accent `UiButton` (including native state
+  materials, typography, translation context, clean opacity and stationary
+  footer). See the [native-UI analysis and tests](SHADERS-NATIVE-UI.md).
+- Independent **Render resolution (optional)**: typed public Display
   calls, aspect-preserving 720/540-short-edge plans, original/target snapshots,
   native commit/read-back, external-change refusal/explicit Keep and bounded
   interrupted-save recovery. Presets/Reset visuals leave the native mode alone.
@@ -177,19 +183,26 @@ and the [real-player verification checklist](SHADERS-USER-TEST.md).
 
 ### Current rendering mitigation and capture evidence
 
-The v20 Settings design confines shell/tab material traversal to generated
-surfaces, with **every page Loader as a hard boundary**, an opaque flat native
-page/footer backing, and flat owned Shaders surfaces. It does not rewrite
-native backgrounds, slider handles or global Overlay popups. The measured
-legacy window is **2434/2468 bytes** (34-byte reserve). This responds to reports
-of game-through pages and stretched Shaders triangles; passing Qt fixtures is
-**not an installed-player root-cause diagnosis or confirmation of repair**.
+The **v21** Settings design uses one flat, opaque live native-theme background
+across the entire frame/page/footer. The user confirmed opacity was restored,
+but the screenshot's brighter outer gradient still mismatched the dark native
+page. That window-wide gradient/rim is now removed: **only the selected tab**
+has a reflection; hover is flat. Every page Loader stays a hard boundary and
+native backgrounds, slider handles, button gradients and global Overlay popups
+are untouched. Shaders imports actual player-QRC controls, not flat owned
+lookalikes. The legacy window remains **2434/2468 bytes** (34-byte reserve).
+Passing Qt fixtures is **not physical-GPU or installed-player shader acceptance**.
+See [native-UI analysis and exact tests](SHADERS-NATIVE-UI.md).
 
 Vulkan diagnostics now separate requested/observed game API, processed frames,
 loader/instance/device/Win32-surface/swapchain/present lifecycle evidence and
 precise queue/HWND exclusion reasons. **Copy rendering status** is user-triggered
 clipboard output only. Worker scans cannot erase a newer active game result.
 Do not infer game ownership or shader success from lifecycle counters.
+The reported device-without-surface run does not establish that Free Fire lacks
+Vulkan support or that its final host presentation is Vulkan. See the
+[source-backed renderer-layer analysis](FREE-FIRE-RENDERER-ANALYSIS.md); there is
+no automatic GL/Qt fallback or claimed game-frame fix.
 
 At `250e98f`, [shader CI 44860490109](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44860490109)
 passes all six jobs, including Windows Qt 5.15.2 / 6.2.4 bridges, two distinct

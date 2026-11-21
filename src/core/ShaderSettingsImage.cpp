@@ -134,6 +134,36 @@ Plan prepare(const QByteArray &image, bool enabled)
         return plan;
     }
     if (enabled) {
+        // A module-only update must not leave the old About traversal free to
+        // restyle native button layers/slider handles. v21 keeps the complete
+        // shell/page/footer flat and opaque, with selected-tab-only glass and a
+        // hard Loader boundary. Older overlays must remain removable below.
+        if (!window.contains(QLatin1String("//BSI v21"))) {
+            plan.error = QStringLiteral("Update the rebuilt Settings panel before installing or updating Shaders. The current design uses the opaque native theme, selected-tab-only glass and isolated stock page/control materials. No file was changed.");
+            return plan;
+        }
+        // The module deliberately does not carry OEM control implementations.
+        // Validate the exact registered qrc:/ namespace it imports, not a
+        // similarly named file elsewhere in the EXE or an unregistered string.
+        const QStringList nativeControls{
+            QStringLiteral("UiThemeObject.qml"), QStringLiteral("UiButton.qml"),
+            QStringLiteral("UiColumnLayout.qml"), QStringLiteral("UiRowLayout.qml"),
+            QStringLiteral("UiCheckBox.qml"), QStringLiteral("UiComboBox.qml"),
+            QStringLiteral("UiSlider.qml"), QStringLiteral("UiScrollView.qml"),
+            QStringLiteral("UiScrollBar.qml"), QStringLiteral("UiImage.qml"),
+            QStringLiteral("UiTextField.qml")
+        };
+        for (const auto &name : nativeControls) {
+            QList<QtResources::File> matches;
+            for (const auto &entry : entries)
+                if (entry.path == name) matches << entry;
+            QString nativeSource, error;
+            if (matches.size() != 1
+                || !decode(QtResources::readFile(image, matches.first(), maxSource), &nativeSource, &error)) {
+                plan.error = QStringLiteral("The stock Settings control qrc:/%1 is missing, ambiguous or unreadable. Shaders requires the player's real controls and live theme; no imitation UI or partial installation was substituted. No file was changed.").arg(name);
+                return plan;
+            }
+        }
         QHash<QString, int> counts;
         for (const auto &file : entries)
             if (file.name.endsWith(QLatin1String(".qml"), Qt::CaseInsensitive)) ++counts[file.name.toCaseFolded()];

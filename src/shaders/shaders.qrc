@@ -1,13 +1,6 @@
 <RCC>
   <qresource prefix="/bsi-shaders">
     <file alias="BsiShadersSetting.qml">BsiShadersSetting.qml</file>
-    <file alias="ShaderStyle.qml">ShaderStyle.qml</file>
-    <file alias="ShaderSurface.qml">ShaderSurface.qml</file>
-    <file alias="ShaderButton.qml">ShaderButton.qml</file>
-    <file alias="ShaderCheckBox.qml">ShaderCheckBox.qml</file>
-    <file alias="ShaderScrollBar.qml">ShaderScrollBar.qml</file>
-    <file alias="ShaderComboBox.qml">ShaderComboBox.qml</file>
-    <file alias="ShaderSlider.qml">ShaderSlider.qml</file>
     <file alias="shaders.svg">../assets/settings-panel-icons/shaders.svg</file>
     <file alias="shaders.png">../assets/settings-panel-icons/shaders.png</file>
   </qresource>

@@ -57,7 +57,7 @@ bool NativeDisplayBinding::bind(QObject *object,QString *error){
        ||!method(object,"confSetInstanceI32",{QMetaType::QString,QMetaType::Int},QMetaType::Void,true).isValid()
        ||!method(object,"confSetInstanceBool",{QMetaType::QString,QMetaType::Bool},QMetaType::Void,true).isValid()
        ||!method(object,"confCommit",{},QMetaType::Void,true).isValid())
-        return refuse(error,"The player's native Display read/write/commit method contract is incomplete or unsupported. Potato is unavailable; visual effects remain independent.");
+        return refuse(error,"The player's native Display read/write/commit method contract is incomplete or unsupported. Render resolution changes are unavailable; visual effects remain independent.");
     backend=object;DisplayResolution resolution;
     if(!read(&resolution,error)){backend=nullptr;return false;}
     return true;
